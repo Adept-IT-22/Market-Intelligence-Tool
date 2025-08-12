@@ -1,1 +1,16 @@
-<p>sidebar works!</p>
+<div class="sidebar-component">
+    <button class="sidebar-button" mat-icon-button (click)="toggleSidebar()">
+        <mat-icon>menu</mat-icon>
+    </button>
+
+    <div class="sidebar-content" [ngClass]="{'closed': !isExpanded}">
+        <ul *ngFor="let item of menuItems">
+            <li>
+                <mat-icon>{{item.icon}}</mat-icon>
+                <a>{{item.name}}</a>
+            </li>
+            
+        </ul>
+    </div>
+    
+</div>
