@@ -1,0 +1,56 @@
+.sidebar-component{
+    background-color: orange;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.sidebar-content{
+    width: 200px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    font-family: 'Century Gothic', sans-serif;
+}
+
+.sidebar-content.closed{
+    width: 70px;
+}
+
+.sidebar-content.closed a{
+    display: none;
+}
+
+.sidebar-button{
+    width: 100%;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.sidebar-content ul{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.sidebar-content ul li{
+    padding: 0px 20px;
+    display: flex;
+    justify-content: start;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+
+    &:hover{
+        background-color: lightgoldenrodyellow;
+    }
+}
+
+.sidebar-content.closed ul li{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
