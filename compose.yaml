@@ -7,3 +7,14 @@ services:
       - "8000:8000"
     volumes:
       - ./DB/market-intelligence.db:/app/DB/market-intelligence.db
+    env_file:
+      - ./Backend/.env 
+    environment:
+      - QDRANT_HOST=qdrant_official
+      - QDRANT_PORT=6333
+    networks:
+      - market_intelligence_network
+
+networks:
+  market_intelligence_network:
+    external: true

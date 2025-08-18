@@ -4,25 +4,39 @@ import google.generativeai as genai
 import qdrant_client
 import pandas as pd
 from qdrant_client import QdrantClient
+from qdrant_client.models import VectorParams, Distance
 from langchain_community.vectorstores import Qdrant
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
 
+logger = logging.getLogger()
+
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+QDRANT_HOST = os.getenv("QDRANT_HOST")
+QDRANT_PORT = os.getenv("QDRANT_PORT")
+QDRANT_URL = os.getenv("QDRANT_URL")
+
+#Get database path
+current_directory = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_directory)
+DATABASE_PATH = os.path.join(project_root, "db", "market-intelligence.db")
+LLM_MODEL_NAME = "gemini-2.5-flash"
+EMBEDDING_MODEL = "BAAI/bge-small-en"
+COLLECTION_NAME = "adept_database"
 
 class AgentManager:
     def __init__(
         self,
-        llm_model_name: str = 'gemini-2.5-flash',
+        llm_model_name: str = LLM_MODEL_NAME,
         api_key: str = GEMINI_API_KEY,
-        database_path: str = '/Users/owenjung/Downloads/adept current aug6 noon.db',
-        qdrant_url: str = 'http://localhost:6333',
-        collection_name: str = 'adept_database',
+        database_path: str = DATABASE_PATH,
+        qdrant_url: str = QDRANT_URL,
+        collection_name: str = COLLECTION_NAME,
         query: str = 'No prompt entered.',
-        embedding_model: str = "BAAI/bge-small-en"
-
+        embedding_model: str = EMBEDDING_MODEL
     ):
         
         self.llm_model_name = llm_model_name
@@ -34,27 +48,34 @@ class AgentManager:
         self.embedding_model = embedding_model
 
         # Initialize Embeddings
+        logger.info("Initializing embeddings")
         self.embeddings = SentenceTransformer(self.embedding_model)
+
         # Embed the query in the same embeddings as 
+        logger.info("Adding query to embeddings")
         self.query_vector = self.embeddings.encode(self.query, convert_to_numpy=True)
 
         # Initialize Qdrant client
-        self.qdrant_client = QdrantClient(host="localhost", port=6333)
+        logger.info("Initializing Qdrant client")
+        self.qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
         # Initialize the Qdrant vector store
+        logger.info("Initializing Qdrant vector store")
         self.qdrant = Qdrant(
             client=self.qdrant_client,
             embeddings=self.embeddings,
             collection_name=self.collection_name
         )
 
-
         # Generate LLM API call
+        logger.info("Configure LLM")
         self.llm_client = genai.configure(api_key = self.api_key)
         self.model = genai.GenerativeModel(self.llm_model_name)
 
     # Helper function which grabs pragma and contents for a single table from SQL
     def get_table_schema(self, table_name: str):
+        logger.info(f"Getting schema for {table_name}")
+        logger.info(f"The database path is: {DATABASE_PATH}")
         to_return = {}
         with sqlite3.connect(self.database_path) as conn:
             cursor = conn.cursor()
@@ -68,13 +89,14 @@ class AgentManager:
 
     # Function which specifically gets routing tables returned by agent
     def get_sql_routing_schemas(self, table_dict: dict):
+        logger.info("Getting routing schemas returned by agent")
         routing_tables = {}
         
         if 'SQL' not in table_dict or not table_dict['SQL']:
-            print("Dictionary doesn't contain SQL sources")
+            logger.error("Dictionary doesn't contain SQL sources")
             return routing_tables
+        
         table_list = table_dict['SQL']
-
         for table in table_list:
             table_schema = self.get_table_schema(table)
 
@@ -93,10 +115,11 @@ class AgentManager:
         return routing_tables
 
     def get_qdrant_routing_schemas(self, table_dict: dict):
+        logger.info("Getting Qdrant routing schemas")
         routing_tables = {}
         
         if 'Qdrant' not in table_dict or not table_dict['Qdrant']:
-            print("Dictionary doesn't contain Qdrant sources")
+            logger.error("Dictionary doesn't contain Qdrant sources")
             return routing_tables
 
         table_list = table_dict['Qdrant']
@@ -116,8 +139,11 @@ class AgentManager:
       
             routing_tables[table] = inner
 
+        return routing_tables #CHANGED
+
     # Semantic search QDrant database for top_k most similar sources to prompt
     def search_qdrant(self, top_k=10, filter_sources=None):
+        logger.info("Qdrant semantic search for top_k most similar sources")
         must_filters = []
         if filter_sources:
             must_filters.append({
@@ -133,10 +159,11 @@ class AgentManager:
     
 
     def open_databases(self, relevant_tables: dict):
+        logger.info("Connecting to database")
         # Connect to Database
         qdrant_list = relevant_tables["QDrant"]
         sql_list = relevant_tables["SQL"]
-        print(f"qdrant list: {qdrant_list}")
+        logger.info(f"qdrant list: {qdrant_list}")
         conn= sqlite3.connect(self.database_path)
         detail_tables = {}
 
@@ -156,6 +183,7 @@ class AgentManager:
 
     # This function has the LLM return a list of relevant sources
     def get_master_response(self):
+        logger.info("LLM returning list of relevant sources")
         master_schema = self.get_table_schema(table_name='Master')
         prompt = self.query
 
@@ -190,6 +218,7 @@ class AgentManager:
     
     # This has the function return a list of relevant individual tables and qdrant points from the two databases. 
     def get_routing_response(self, qdrant_dict, sql_dict):
+        logger.info("Get list of relevant tables")
         prompt = self.query
         qdrant_sources = qdrant_dict
         sql_sources = sql_dict
@@ -242,11 +271,8 @@ class AgentManager:
         else:
             qdrant_list = []
 
-        print('SQL Tables: ')
-        print(sql_list)
-
-        print('\n QDrant Point IDs: ')
-        print(qdrant_list)
+        logger.info(f'SQL Tables: \n{sql_list}')
+        logger.info(f'\n QDrant Point IDs: \n{qdrant_list}')
 
         to_return['SQL'] = sql_list
         to_return['QDrant'] = qdrant_list
@@ -254,6 +280,7 @@ class AgentManager:
         return to_return
     
     def get_final_response(self, qdrant_results, detail_tables):
+        logger.info("Producing final result")
         query = self.query
         final_response = self.model.generate_content(
             f"""You are a SQLite expert, tasked with retrieval from a database of public Kenyan information.
@@ -273,9 +300,10 @@ class AgentManager:
         response_text = final_response.text
         print(response_text)
 
-        return 
+        return response_text #CHANGED
 
     def pipeline(self):
+        logger.info("Running the pipeline")
         qdrant_search = self.search_qdrant(top_k = 10)
 
         master_dict = self.get_master_response()
@@ -300,7 +328,6 @@ class AgentManager:
         to_return['qdrant_list']=qdrant_list
         to_return['qdrant_search']=qdrant_search
 
+        logger.info("Completed pipeline")
 
-manager = AgentManager(query="I'm a farmer in Limuru and want to explore selling my excess maize stock. How might I go about doing that and am i in the right location?")
-output = manager.pipeline()
-
+        return to_return 
