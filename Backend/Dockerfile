@@ -1,52 +1,28 @@
-# syntax=docker/dockerfile:1
+# Use a slim Python image
+FROM python:3.13-slim
 
-# Comments are provided throughout this file to help you get started.
-# If you need more help, visit the Dockerfile reference guide at
-# https://docs.docker.com/go/dockerfile-reference/
-
-# Want to help us make this template better? Share your feedback here: https://forms.gle/ybq9Krt8jtBL3iCk7
-
-ARG PYTHON_VERSION=3.13
-FROM python:${PYTHON_VERSION}-slim as base
-
-# Prevents Python from writing pyc files.
-ENV PYTHONDONTWRITEBYTECODE=1
-
-# Keeps Python from buffering stdout and stderr to avoid situations where
-# the application crashes without emitting any logs due to buffering.
-ENV PYTHONUNBUFFERED=1
-
+# Set the working directory
 WORKDIR /app
 
-# Download dependencies as a separate step to take advantage of Docker's caching.
-# Leverage a cache mount to /root/.cache/pip to speed up subsequent builds.
-# Leverage a bind mount to requirements.txt to avoid having to copy them into
-# into this layer.
+# Install system dependencies needed for building wheels and git
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements.txt first for build cache efficiency
 COPY requirements.txt .
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python -m pip install -r requirements.txt
+# --- Install PyTorch and all other dependencies ---
+# This command installs PyTorch libraries for CPU, then the rest from requirements.txt
+RUN pip install --no-cache-dir torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 \
+    --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements.txt
 
-# Create a non-privileged user that the app will run under.
-# See https://docs.docker.com/go/dockerfile-user-best-practices/
-ARG UID=10001
-RUN adduser \
-    --disabled-password \
-    --gecos "" \
-    --home "/nonexistent" \
-    --shell "/sbin/nologin" \
-    --no-create-home \
-    --uid "${UID}" \
-    appuser
-
-# Copy the source code into the container.
+# Copy the rest of the application
 COPY . .
 
-# Switch to the non-privileged user to run the application.
-USER appuser
-
-# Expose the port that the application listens on.
+# Expose app port
 EXPOSE 8000
 
-# Run the application.
-CMD gunicorn 'main:app' --bind=0.0.0.0:8000
+# Run the app
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "main:app", "--reload", "--timeout", "120"]
