@@ -1,4 +1,5 @@
 from flask import Flask, request
+import time
 import os
 from dotenv import load_dotenv
 import logging
@@ -23,7 +24,7 @@ print(f"Connecting to Qdrant at {qdrant_url}")
 
 @app.route('/query', methods=["GET", "POST"])
 def run_query()->Dict:
-
+    start_time = time.perf_counter()
     logger.info("Running Query...")
 
     user_query = request.args.get("q")
@@ -38,13 +39,19 @@ def run_query()->Dict:
 
         logger.info("============QUERY RESULTS==========")
         logger.info(results)
+        
+        duration = time.perf_counter() - start_time
+        logger.info(f"This task took {duration:.2f} seconds")
         return {"results": results}
 
     except Exception as e:
         logger.error(f"Couldn't run the query: {str(e)}")
         return {"error": str(e)}, 500
 
+    
+
 if __name__ == "__main__":
     logger.info("App starting...")
+    
     app.run(host="0.0.0.0", port=8000)
     
