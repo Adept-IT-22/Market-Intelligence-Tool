@@ -2,13 +2,28 @@
     <div class="search-component">
         <div class="intro-text">
             <h3>Ask Me Anything!</h3>
-            <p>Let an extensive repository of data guide your analysis</p>
+            <p>Let an extensive data repository guide your analysis</p>
         </div>
-        <input class="search-input" type="text" />
+        <input 
+            class="search-input" 
+            type="text" 
+            [(ngModel)]="query"
+            placeholder="How may I help you?"
+        />
 
         <div class="search-button">
-            <button type="submit" class="btn-search">Search</button>
+            <button 
+                type="submit" 
+                class="btn-search"
+                (click)="sendQuery()"
+            >Search</button>
         </div>
     </div>
     
+    <div class="response-component">
+        <h4>Response:</h4>
+        <markdown
+            [data] = "response.Results">
+        </markdown>
+    </div>
 </div>
