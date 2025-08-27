@@ -9,12 +9,14 @@ from langchain_community.vectorstores import Qdrant
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 import logging
+from openai import OpenAI
 
 load_dotenv()
 
 logger = logging.getLogger()
 
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+DEEPSEEK_BASE_URL="https://api.deepseek.com"
 QDRANT_HOST = os.getenv("QDRANT_HOST")
 QDRANT_PORT = os.getenv("QDRANT_PORT")
 QDRANT_URL = os.getenv("QDRANT_URL")
@@ -22,8 +24,8 @@ QDRANT_URL = os.getenv("QDRANT_URL")
 #Get database path
 current_directory = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_directory)
-DATABASE_PATH = os.path.join(project_root, "db", "market-intelligence.db")
-LLM_MODEL_NAME = "gemini-2.5-flash"
+DATABASE_PATH = os.path.join(project_root, "DB", "market-intelligence.db")
+LLM_MODEL_NAME = "deepseek-chat"
 EMBEDDING_MODEL = "BAAI/bge-small-en"
 COLLECTION_NAME = "adept_database"
 
@@ -31,7 +33,7 @@ class AgentManager:
     def __init__(
         self,
         llm_model_name: str = LLM_MODEL_NAME,
-        api_key: str = GEMINI_API_KEY,
+        api_key: str = DEEPSEEK_API_KEY,
         database_path: str = DATABASE_PATH,
         qdrant_url: str = QDRANT_URL,
         collection_name: str = COLLECTION_NAME,
@@ -69,8 +71,8 @@ class AgentManager:
 
         # Generate LLM API call
         logger.info("Configure LLM")
-        self.llm_client = genai.configure(api_key = self.api_key)
-        self.model = genai.GenerativeModel(self.llm_model_name)
+        self.llm_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+        self.model = self.llm_client
 
     # Helper function which grabs pragma and contents for a single table from SQL
     def get_table_schema(self, table_name: str):
@@ -78,13 +80,14 @@ class AgentManager:
         logger.info(f"The database path is: {DATABASE_PATH}")
         to_return = {}
         with sqlite3.connect(self.database_path) as conn:
-            cursor = conn.cursor()
+            #cursor = conn.cursor()
             # pragma gives (cid, name, type, notnull, dflt_value, pk)
-            cursor.execute(f'PRAGMA table_info("{table_name}")')
-            to_return['Schema'] = cursor.fetchall()
+            #cursor.execute(f'PRAGMA table_info("{table_name}")')
+            #to_return['Schema'] = cursor.fetchall()
 
             df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', conn)
-            to_return['Rows'] = df
+            to_return = df.to_dict()
+        logger.info(f"To return consists: {to_return}")
         return to_return
 
     # Function which specifically gets routing tables returned by agent
@@ -99,18 +102,8 @@ class AgentManager:
         table_list = table_dict['SQL']
         for table in table_list:
             table_schema = self.get_table_schema(table)
-
-            schema = table_schema['Schema']  # list of (cid, name, type, ...)
-            col_names = [c[1] for c in schema]
-            rows = table_schema['Rows']
-            
-            key_col = col_names.index('table_name') # Column table_names is the one to grab
-            inner = {}  
-            for _, row in rows.iterrows():
-                key = row.iloc[key_col]
-                inner[key] = row
       
-            routing_tables[table] = inner
+            routing_tables[table] = table_schema
         
         return routing_tables
 
@@ -125,21 +118,12 @@ class AgentManager:
         table_list = table_dict['Qdrant']
 
         for table in table_list:
-            table_schema = self.get_table_schema(table)
-
-            schema = table_schema['Schema']  # list of (cid, name, type, ...)
-            col_names = [c[1] for c in schema]
-            rows = table_schema['Rows']
-            
-            key_col = col_names.index('qdrant_point_id') # Column table_names is the one to grab
-            inner = {}  
-            for _, row in rows.iterrows():
-                key = row.iloc[key_col]
-                inner[key] = row
+            for table in table_list:
+                table_schema = self.get_table_schema(table)
       
-            routing_tables[table] = inner
-
-        return routing_tables #CHANGED
+                routing_tables[table] = table_schema
+        
+        return routing_tables
 
     # Semantic search QDrant database for top_k most similar sources to prompt
     def search_qdrant(self, top_k=10, filter_sources=None):
@@ -150,6 +134,8 @@ class AgentManager:
                 "key": "source",
                 "match": {"any": filter_sources}
             })
+        
+        logger.info(f"The necessary qdrant sources are {must_filters}")
 
         return self.qdrant_client.query_points(
             collection_name=self.collection_name,
@@ -185,27 +171,36 @@ class AgentManager:
     def get_master_response(self):
         logger.info("LLM returning list of relevant sources")
         master_schema = self.get_table_schema(table_name='Master')
+        logger.info(f"The master schema is: {master_schema}")
         prompt = self.query
 
-        master_response = self.model.generate_content(
-        f"""You are a SQLITE expert, tasked with retrieval from a database of public Kenyan information. The data is organized in a Master-Detail 
-        format, with the first Master table being as follows: {master_schema}. You have a user who has given you the following prompt: {prompt}.
+        master_response = self.model.chat.completions.create(
+            model=self.llm_model_name,
+            messages=[
+                {"role": "system", "content": "You are a highly experienced SQLite database expert. You are assisting with querying a database of Kenyan market intelligence."
+                " You are precise, factual, and always cite your sources from the database. Do not hallucinate table names or columns; only use what exists in the provided schema."},
+                {"role": "user", "content": f"""You are a SQLITE expert, tasked with retrieval from a database of public Kenyan information. The data is organized in a Master-Detail 
+                format, with the Master table having the following content: {master_schema}. You have a user who has given you the following prompt: {prompt}.
 
-        Using information from the columns Summary and Sections, create a list of tables from the column table_name that might contain data relevant to the user's question.
-        There is no limit on the amount of tables you want to retrieve; only reject tables if it's highly unlikely that they contain relevant information.
-        Return at least one table of datatype SQL and at least one of datatype QDrant. 
+                Using information from the columns 'Summary' and 'Sectors', select at least one of the tables 'table_name', that contains data relevant to the user's question.Only
+                included tables that are listed in the table.
 
-        Return the table_names in the following format, separated by commas with no spaces, and return nothing else:
-        table_a,table_b,table_c
-        """
+                Return the sources in the following format, separated by commas with no spaces, and return nothing else:
+                table_a,table_b,table_c
+                """}
+            ],
+            temperature=0.0
         )
         
-        table_list = master_response.text.split(',')
+        table_list = master_response.choices[0].message.content.split(',')
+        logger.info(f"The table list is: {table_list}")
+
         conn = sqlite3.connect(self.database_path)
         cursor = conn.cursor()
         result_dict = {}
 
         for table in table_list:
+            logger.info(f"The table is: {table}")
             cursor.execute("SELECT Datatype FROM Master WHERE table_name = ?", (table,))
             row = cursor.fetchone()  # single row
             if row:  # if a match was found
@@ -214,6 +209,7 @@ class AgentManager:
 
         conn.close()
 
+        logger.info(f"The result dict is: {result_dict}")
         return result_dict
     
     # This has the function return a list of relevant individual tables and qdrant points from the two databases. 
@@ -221,28 +217,44 @@ class AgentManager:
         logger.info("Get list of relevant tables")
         prompt = self.query
         qdrant_sources = qdrant_dict
+        logger.info(f"Qdrant sources: {qdrant_sources}")
         sql_sources = sql_dict
-        sql_response = self.model.generate_content(
-            f"""You are a SQLite expert, tasked with retrieval from a database of public Kenyan information.
+        logger.info(f"The SQL sources are {sql_sources}")
 
-            The SQL tables that point to SQL details you may access are as following: {sql_sources}.
+        if not qdrant_sources and not sql_sources:
+            logger.error("No qdrant AND sql sources found")
+            return
 
-            Your primary goal is to write sqlite commands to find and return relevant tables to the client's prompt, completely unaltered. 
-            Use the routing tables (using Title and sectors, along with any other inferences you might make) to find individual tables
-            (dictionary keys) that are relevant to the prompt. Return these (find 5-10 sources)
-            table_names as a list, openable with SQLite, putting the most relevant tables first.
+        sql_response = self.model.chat.completions.create(
+            model=self.llm_model_name,
+            messages=[
+                {"role": "system", "content": "You are a highly experienced SQLite database expert. You are assisting with querying a database of Kenyan market intelligence."
+                " You are precise, factual, and always cite your sources from the database. Do not hallucinate table names or columns; only use what exists in the provided schema."},
+                {"role": "user", "content": f"""You are a SQLite expert, tasked with retrieval from a database of public Kenyan information.
 
-            Once you have found these sources, return them in list format, without any additional text. Tables should be in the
-            following format: table_a,table_b,table_c,table_d so that they can be split by str.split(',').
+                The SQL tables that point to SQL details you may access are as following: {sql_sources}.
 
-            Return only the comma-separated list, and nothing else. 
+                Your primary goal is to write sqlite commands to find and return relevant tables to the client's prompt, completely unaltered. 
+                Use the routing tables (using Title and sectors, along with any other inferences you might make) to find individual tables
+                (dictionary keys) that are relevant to the prompt. Return these (find 5-10 sources)
+                table_names as a list, openable with SQLite, putting the most relevant tables first.
 
-            The client's prompt is as follows: {prompt}. When reading this client's prompt, think about what sectors might be relevant to them and what kind of data they might be looking for within that sector.
-            """
+               Once you have found these sources, return them in list format, without any additional text. Tables should be in the
+                following format: table_a,table_b,table_c,table_d so that they can be split by str.split(',').
+
+                Return only the comma-separated list, and nothing else. 
+
+                The client's prompt is as follows: {prompt}. When reading this client's prompt, think about what sectors might be relevant to them and what kind of data they might be looking for within that sector.
+                """}
+            ]
         )
         if qdrant_dict:
-            qdrant_response = self.model.generate_content(
-                f"""You are a SQLite expert, tasked with retrieval from a database of public Kenyan information.
+            qdrant_response = self.model.chat.completions.create(
+                model=self.llm_model_name,
+                messages=[
+                {"role": "system", "content": "You are a highly experienced SQLite database expert. You are assisting with querying a database of Kenyan market intelligence."
+                " You are precise, factual, and always cite your sources from the database. Do not hallucinate table names or columns; only use what exists in the provided schema."},
+                {"role": "user", "content": f"""You are a SQLite expert, tasked with retrieval from a database of public Kenyan information.
 
                 The SQL tables that point to Qdrant point IDs you may access are as following: {qdrant_sources}.
 
@@ -258,6 +270,8 @@ class AgentManager:
 
                 The client's prompt is as follows: {prompt}. When reading this client's prompt, think about what information might be relevant and what kind of data they might be looking for within that chunk.
                 """
+                }
+                ]
             )
         else:
             qdrant_response = ""
@@ -265,9 +279,9 @@ class AgentManager:
         
         to_return = {}
         if sql_response:
-            sql_list = sql_response.text.split(',')
+            sql_list = sql_response.choices[0].message.content.split(',')
         if qdrant_response:
-            qdrant_list = qdrant_response.text.split('')
+            qdrant_list = qdrant_response.choices[0].message.content.split('')
         else:
             qdrant_list = []
 
@@ -282,22 +296,27 @@ class AgentManager:
     def get_final_response(self, qdrant_results, detail_tables):
         logger.info("Producing final result")
         query = self.query
-        final_response = self.model.generate_content(
-            f"""You are a SQLite expert, tasked with retrieval from a database of public Kenyan information.
+        final_response = self.model.chat.completions.create(
+            model=self.llm_model_name,
+            messages=[
+                {"role": "system", "content": "You are a SQLite expert..."},
+                {"role": "user", "content": f"""You are a SQLite expert, tasked with retrieval from a database of public Kenyan information.
 
-            You have already received a client's prompt and returned the following dictionary of relevant tables and text chunks: {detail_tables}. Also, you have received
-            the following list of QDrant-stored text chunks via RAG: {qdrant_results}.
-            The prompt was as follows: {query}. Return the relevant SQL tables'
-            table master and detail IDs, along with the corresponding table_name and Title from the routing table, at the top of your response, allowing me to go into the database and find those tables myself, putting the most relevant tables first.
+                You have already received a client's prompt and returned the following dictionary of relevant tables and text chunks: {detail_tables}. Also, you have received
+                the following list of QDrant-stored text chunks via RAG: {qdrant_results}.
+                The prompt was as follows: {query}. Return the relevant SQL tables'
+                table master and detail IDs, along with the corresponding table_name and Title from the routing table, at the top of your response, allowing me to go into the database and find those tables myself, putting the most relevant tables first.
 
-            After this return, I want a paragraph of relevant information and some insight sourced from within the detail tables you found. Include SQLite commands to the data you cite as parenthetical sources, so that we can go into the tables ourselves
-            and check the data. In this paragraph, make sure to be accurate with units. In this paragraph, attempt to combine multiple insights to tell coherent 'stories' pertaining to the client's request.
-            When coming up with your advice, be completely honest, with no bias towards what the client seems to want. However, even if you think that one course of direction makes lots of sense, be sure to include at least one piece of evidence
-            against that course of action, in order to paint the most transparent picture.
+                After this return, I want a paragraph of relevant information and some insight sourced from within the detail tables you found. Include SQLite commands to the data you cite as parenthetical sources, so that we can go into the tables ourselves
+                and check the data. In this paragraph, make sure to be accurate with units. In this paragraph, attempt to combine multiple insights to tell coherent 'stories' pertaining to the client's request.
+                When coming up with your advice, be completely honest, with no bias towards what the client seems to want. However, even if you think that one course of direction makes lots of sense, be sure to include at least one piece of evidence
+                against that course of action, in order to paint the most transparent picture.
 
-            Finally, suggest one or two more potential avenues of research for the client."""
+                Finally, suggest one or two more potential avenues of research for the client."""}
+            ]
         )
-        response_text = final_response.text
+        
+        response_text = final_response.choices[0].message.content
         print(response_text)
 
         return response_text #CHANGED
@@ -320,14 +339,14 @@ class AgentManager:
 
         final_response = self.get_final_response(qdrant_results=qdrant_search, detail_tables = detail_tables)
 
-        
-        to_return = {}
+        return final_response
+        #to_return = {}
 
-        to_return['text']= final_response
-        to_return['sql_list']=sql_list
-        to_return['qdrant_list']=qdrant_list
-        to_return['qdrant_search']=qdrant_search
+        #to_return['text']= final_response
+        #to_return['sql_list']=sql_list
+        #to_return['qdrant_list']=qdrant_list
+        #to_return['qdrant_search']=qdrant_search
 
-        logger.info("Completed pipeline")
+        #logger.info("Completed pipeline")
 
-        return to_return 
+        #return to_return 
