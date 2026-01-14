@@ -1,29 +1,42 @@
-<div class="search-page">
-    <div class="search-component">
-        <div class="intro-text">
-            <h3>Ask Me Anything!</h3>
-            <p>Let an extensive data repository guide your analysis</p>
-        </div>
-        <input 
-            class="search-input" 
-            type="text" 
-            [(ngModel)]="query"
-            placeholder="How may I help you?"
-        />
+<div class="search-page" [class.has-response]="response || isLoading">
 
-        <div class="search-button">
-            <button 
-                type="submit" 
-                class="btn-search"
-                (click)="sendQuery()"
-            >Search</button>
+    <!-- Hero section shown when no activity -->
+    <div class="hero-section" *ngIf="!response && !isLoading">
+        <h1>Market Intelligence</h1>
+        <p>Ask anything about the Kenyan market and let data guide your decisions.</p>
+    </div>
+
+    <!-- Chat/Response Area -->
+    <div class="chat-area" *ngIf="response || isLoading">
+        <div class="message user-message" *ngIf="query">
+            <div class="message-content">{{ query }}</div>
+        </div>
+
+        <div class="message ai-message" *ngIf="isLoading">
+            <div class="loading-skeleton">
+                <div class="skeleton-line"></div>
+                <div class="skeleton-line short"></div>
+                <div class="skeleton-line"></div>
+            </div>
+        </div>
+
+        <div class="message ai-message" *ngIf="response">
+            <div class="message-content">
+                <markdown [data]="response.Results"></markdown>
+            </div>
         </div>
     </div>
-    
-    <div class="response-component">
-        <h4>Response:</h4>
-        <markdown
-            [data] = "response.Results">
-        </markdown>
+
+    <!-- Sticky Input Container -->
+    <div class="input-container">
+        <div class="input-wrapper">
+            <textarea class="search-input" rows="1" [(ngModel)]="query" placeholder="Message Intelligence..."
+                (keydown.enter)="$event.preventDefault(); sendQuery()"></textarea>
+
+            <button class="send-btn" [disabled]="!query.trim() || isLoading" (click)="sendQuery()">
+                <mat-icon>{{ isLoading ? 'hourglass_empty' : 'send' }}</mat-icon>
+            </button>
+        </div>
+        <p class="input-footer">AI can make mistakes. Verify important info.</p>
     </div>
 </div>
