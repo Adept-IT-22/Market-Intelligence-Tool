@@ -8,9 +8,15 @@ import { environment } from '../../../../environments/environment';
 import { gsap } from 'gsap';
 
 interface ChatMessage {
-  role: 'user' | 'ai';
   content: string;
   timestamp: Date;
+}
+
+interface ChatThread {
+  userMessage: ChatMessage;
+  aiMessage?: ChatMessage;
+  isLoading?: boolean;
+  loadingStep?: string;
   isTyping?: boolean;
 }
 
@@ -25,9 +31,7 @@ export class MainSearchComponent implements AfterViewChecked {
   @ViewChild('scrollContainer') private scrollContainer!: ElementRef;
 
   query: string = '';
-  messages: ChatMessage[] = [];
-  isLoading: boolean = false;
-  loadingStep: string = 'Thinking...';
+  threads: ChatThread[] = [];
 
   private loadingSteps = [
     "Analyzing your request...",
@@ -37,6 +41,10 @@ export class MainSearchComponent implements AfterViewChecked {
   ];
 
   constructor(private http: HttpClient) { }
+
+  get isLoading(): boolean {
+    return this.threads.some(t => t.isLoading);
+  }
 
   ngAfterViewChecked() {
     this.scrollToBottom();
@@ -53,69 +61,66 @@ export class MainSearchComponent implements AfterViewChecked {
   sendQuery() {
     if (!this.query.trim()) return;
 
-    // 1. Add User Message
-    const userMsg: ChatMessage = {
-      role: 'user',
-      content: this.query,
-      timestamp: new Date()
+    // 1. Create New Thread
+    const newThread: ChatThread = {
+      userMessage: {
+        content: this.query,
+        timestamp: new Date()
+      },
+      isLoading: true,
+      loadingStep: this.loadingSteps[0]
     };
-    this.messages.push(userMsg);
 
-    // Save query for API call
+    this.threads.push(newThread);
+
+    // Save context
     const distinctQuery = this.query;
     this.query = '';
 
-    // 2. Set Loading State
-    this.isLoading = true;
-    this.cycleLoadingSteps();
+    // 2. Start Loading Cycle for this specific thread
+    this.cycleLoadingSteps(newThread);
 
     // 3. Call API
     const payload = { query: distinctQuery };
     this.http.post(`${environment.apiUrl}/query`, payload).subscribe({
       next: (res: any) => {
-        this.isLoading = false;
+        newThread.isLoading = false;
+        newThread.isTyping = true;
 
-        const aiMsg: ChatMessage = {
-          role: 'ai',
+        newThread.aiMessage = {
           content: '',
-          timestamp: new Date(),
-          isTyping: true
+          timestamp: new Date()
         };
-        this.messages.push(aiMsg);
 
-        this.typewriteResponse(aiMsg, res.Results);
+        // 4. Trigger GSAP Typewriter
+        this.typewriteResponse(newThread, res.Results);
       },
       error: (err) => {
         console.error('Error fetching data', err);
-        this.isLoading = false;
-        this.messages.push({
-          role: 'ai',
+        newThread.isLoading = false;
+        newThread.aiMessage = {
           content: "⚠️ Error: Could not reach the intelligence engine. Please try again later.",
           timestamp: new Date()
-        });
+        };
       }
     });
   }
 
-  private cycleLoadingSteps() {
+  private cycleLoadingSteps(thread: ChatThread) {
     let stepIndex = 0;
-    this.loadingStep = this.loadingSteps[0];
 
-    // Simple interval to change loading text. 
-    // In a real app with WebSocket, this would be event-driven.
     const interval = setInterval(() => {
-      if (!this.isLoading) {
+      if (!thread.isLoading) {
         clearInterval(interval);
         return;
       }
       stepIndex = (stepIndex + 1) % this.loadingSteps.length;
-      this.loadingStep = this.loadingSteps[stepIndex];
+      thread.loadingStep = this.loadingSteps[stepIndex];
     }, 2000);
   }
 
-  private typewriteResponse(message: ChatMessage, fullText: string) {
+  private typewriteResponse(thread: ChatThread, fullText: string) {
     const proxy = { value: 0 };
-    // Adjust speed based on length, max 10 seconds
     const duration = Math.min(fullText.length * 0.005, 10);
 
     gsap.to(proxy, {
@@ -124,11 +129,15 @@ export class MainSearchComponent implements AfterViewChecked {
       ease: "none",
       onUpdate: () => {
         const charIndex = Math.floor(proxy.value);
-        message.content = fullText.substring(0, charIndex);
+        if (thread.aiMessage) {
+          thread.aiMessage.content = fullText.substring(0, charIndex);
+        }
       },
       onComplete: () => {
-        message.content = fullText;
-        message.isTyping = false;
+        if (thread.aiMessage) {
+          thread.aiMessage.content = fullText;
+        }
+        thread.isTyping = false;
       }
     });
   }

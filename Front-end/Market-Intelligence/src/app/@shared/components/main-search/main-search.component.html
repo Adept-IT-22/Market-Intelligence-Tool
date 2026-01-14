@@ -1,41 +1,56 @@
-<div class="search-page" [class.has-response]="messages.length > 0 || isLoading">
+<div class="search-page" [class.has-response]="threads.length > 0 || isLoading">
 
     <!-- Hero section shown when no activity -->
-    <div class="hero-section" *ngIf="messages.length === 0 && !isLoading">
+    <div class="hero-section" *ngIf="threads.length === 0 && !isLoading">
         <h1>Market Intelligence</h1>
         <p>Ask anything about the Kenyan market and let data guide your decisions.</p>
     </div>
 
     <!-- Chat/Response Area -->
-    <div class="chat-area" #scrollContainer *ngIf="messages.length > 0 || isLoading">
+    <div class="chat-area" #scrollContainer *ngIf="threads.length > 0">
 
-        <div *ngFor="let msg of messages" class="message"
-            [ngClass]="{'user-message': msg.role === 'user', 'ai-message': msg.role === 'ai'}">
+        <div *ngFor="let thread of threads" class="chat-thread">
 
-            <div class="avatar" *ngIf="msg.role === 'ai'">
-                <mat-icon>smart_toy</mat-icon>
+            <!-- 1. User Query Node (Locked) -->
+            <div class="thread-node user-node">
+                <div class="node-icon user-icon">
+                    <mat-icon>person</mat-icon>
+                </div>
+                <div class="node-content user-content locked">
+                    <div class="query-text">{{ thread.userMessage.content }}</div>
+                </div>
             </div>
 
-            <div class="message-content">
-                <div *ngIf="msg.role === 'user'">{{ msg.content }}</div>
-                <markdown *ngIf="msg.role === 'ai'" [data]="msg.content"></markdown>
-                <span *ngIf="msg.role === 'ai' && msg.isTyping" class="cursor">|</span>
-            </div>
-        </div>
+            <!-- Connector Line -->
+            <div class="thread-connector"></div>
 
-        <!-- Loading Step Indicator -->
-        <div class="message ai-message loading-state" *ngIf="isLoading">
-            <div class="avatar">
-                <mat-icon class="spin">sync</mat-icon>
-            </div>
-            <div class="message-content">
-                <div class="loading-text">{{ loadingStep }}</div>
-                <div class="loading-skeleton">
-                    <div class="skeleton-line"></div>
-                    <div class="skeleton-line short"></div>
+            <!-- 2. AI Response Node -->
+            <div class="thread-node ai-node">
+                <!-- Icon -->
+                <div class="node-icon ai-icon" [class.pulsing]="thread.isLoading">
+                    <mat-icon>{{ thread.isLoading ? 'sync' : 'smart_toy' }}</mat-icon>
+                </div>
+
+                <!-- Content -->
+                <div class="node-content ai-content">
+
+                    <!-- Loading State -->
+                    <div class="loading-indicator" *ngIf="thread.isLoading">
+                        <span class="step-text">{{ thread.loadingStep }}</span>
+                        <div class="progress-bar">
+                            <div class="progress-fill"></div>
+                        </div>
+                    </div>
+
+                    <!-- Actual Response -->
+                    <div class="response-text" *ngIf="!thread.isLoading && thread.aiMessage">
+                        <markdown [data]="thread.aiMessage.content"></markdown>
+                        <span *ngIf="thread.isTyping" class="cursor">|</span>
+                    </div>
                 </div>
             </div>
         </div>
+
     </div>
 
     <!-- Sticky Input Container -->
