@@ -1,28 +1,39 @@
-<div class="search-page" [class.has-response]="response || isLoading">
+<div class="search-page" [class.has-response]="messages.length > 0 || isLoading">
 
     <!-- Hero section shown when no activity -->
-    <div class="hero-section" *ngIf="!response && !isLoading">
+    <div class="hero-section" *ngIf="messages.length === 0 && !isLoading">
         <h1>Market Intelligence</h1>
         <p>Ask anything about the Kenyan market and let data guide your decisions.</p>
     </div>
 
     <!-- Chat/Response Area -->
-    <div class="chat-area" *ngIf="response || isLoading">
-        <div class="message user-message" *ngIf="query">
-            <div class="message-content">{{ query }}</div>
-        </div>
+    <div class="chat-area" #scrollContainer *ngIf="messages.length > 0 || isLoading">
 
-        <div class="message ai-message" *ngIf="isLoading">
-            <div class="loading-skeleton">
-                <div class="skeleton-line"></div>
-                <div class="skeleton-line short"></div>
-                <div class="skeleton-line"></div>
+        <div *ngFor="let msg of messages" class="message"
+            [ngClass]="{'user-message': msg.role === 'user', 'ai-message': msg.role === 'ai'}">
+
+            <div class="avatar" *ngIf="msg.role === 'ai'">
+                <mat-icon>smart_toy</mat-icon>
+            </div>
+
+            <div class="message-content">
+                <div *ngIf="msg.role === 'user'">{{ msg.content }}</div>
+                <markdown *ngIf="msg.role === 'ai'" [data]="msg.content"></markdown>
+                <span *ngIf="msg.role === 'ai' && msg.isTyping" class="cursor">|</span>
             </div>
         </div>
 
-        <div class="message ai-message" *ngIf="response">
+        <!-- Loading Step Indicator -->
+        <div class="message ai-message loading-state" *ngIf="isLoading">
+            <div class="avatar">
+                <mat-icon class="spin">sync</mat-icon>
+            </div>
             <div class="message-content">
-                <markdown [data]="response.Results"></markdown>
+                <div class="loading-text">{{ loadingStep }}</div>
+                <div class="loading-skeleton">
+                    <div class="skeleton-line"></div>
+                    <div class="skeleton-line short"></div>
+                </div>
             </div>
         </div>
     </div>

@@ -44,13 +44,19 @@
     max-width: 800px;
     display: flex;
     flex-direction: column;
-    gap: 32px;
-    padding: 40px 20px;
+    gap: 24px;
+    padding: 40px 20px 140px 20px;
+    /* Extra bottom padding for scroll */
+    overflow-y: auto;
+    flex-grow: 1;
+    scroll-behavior: smooth;
 }
 
 .message {
     display: flex;
     width: 100%;
+    gap: 16px;
+    animation: fadeIn 0.3s ease-up;
 
     &.user-message {
         justify-content: flex-end;
@@ -68,22 +74,78 @@
     &.ai-message {
         justify-content: flex-start;
 
+        .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            flex-shrink: 0;
+
+            mat-icon {
+                font-size: 20px;
+                width: 20px;
+                height: 20px;
+            }
+        }
+
         .message-content {
             color: var(--text-primary);
-            line-height: 1.7;
+            line-height: 1.6;
             width: 100%;
-            font-size: 1.05rem;
+            font-size: 1rem;
+            padding-top: 6px;
         }
     }
 }
 
+.cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    background-color: var(--accent-primary);
+    animation: blink 1s step-end infinite;
+    vertical-align: middle;
+    margin-left: 2px;
+}
+
+@keyframes blink {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0;
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 .input-container {
+    position: absolute;
+    /* Changed from fixed to absolute to stick within relative parent if needed, or fixed if global */
     position: fixed;
     bottom: 0;
     left: 50%;
     transform: translateX(-50%);
     width: 100%;
-    max-width: 800px;
+    max-width: 900px;
+    /* Slightly wider */
     padding: 24px;
     background: linear-gradient(to top, var(--bg-primary) 80%, transparent);
     z-index: 10;
@@ -159,16 +221,37 @@
     color: var(--text-muted);
 }
 
-/* Loading Skeleton */
+/* Loading States */
+.loading-state {
+    align-items: flex-start;
+
+    .spin {
+        animation: spin 2s linear infinite;
+    }
+}
+
+.loading-text {
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+@keyframes spin {
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
 .loading-skeleton {
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
+    max-width: 300px;
 }
 
 .skeleton-line {
-    height: 14px;
+    height: 10px;
     background: linear-gradient(90deg, var(--bg-accent) 25%, var(--border-color) 50%, var(--bg-accent) 75%);
     background-size: 200% 100%;
     animation: skeleton-loading 1.5s infinite linear;
@@ -190,11 +273,20 @@
     }
 }
 
-/* Response Text Adjustments */
+/* Markdown Styles */
 :host ::ng-deep {
     markdown {
         p {
             margin-bottom: 16px;
+        }
+
+        h1,
+        h2,
+        h3 {
+            margin-top: 24px;
+            margin-bottom: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
         }
 
         ul,
@@ -211,6 +303,8 @@
             background: var(--bg-accent);
             padding: 2px 4px;
             border-radius: 4px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.9em;
         }
 
         pre {
@@ -220,6 +314,39 @@
             border: 1px solid var(--border-color);
             overflow-x: auto;
             margin: 16px 0;
+        }
+
+        blockquote {
+            border-left: 4px solid var(--accent-secondary);
+            padding-left: 16px;
+            color: var(--text-secondary);
+            margin: 16px 0;
+        }
+
+        a {
+            color: var(--accent-primary);
+            text-decoration: none;
+
+            &:hover {
+                text-decoration: underline;
+            }
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+        }
+
+        th,
+        td {
+            border: 1px solid var(--border-color);
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background-color: var(--bg-accent);
         }
     }
 }
