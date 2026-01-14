@@ -1,12 +1,16 @@
-<div class="navbar">
+<nav class="navbar">
     <div class="navbar-left">
-        <img src="transparent adept logo.png" alt="Logo" class="logo-image" />
-        <a class="product-text" [routerLink]="'/'">El Gringo Analytics Ltd.</a>
+        <a routerLink="/" class="product-text">
+            EL GRINGO ANALYTICS
+        </a>
     </div>
-    <nav class="nav-items">
-        <a routerLink="/home" class="nav-link">Home</a>
-        <a routerLink="/ideas" class="nav-link">Analytics</a>
-        <a routerLink="/projects" class="nav-link">Projects</a>
-        <a routerLink="/user-manual" class="nav-link">User Manual</a>
-    </nav>
-</div>
+
+    <div class="nav-items">
+        <button class="nav-link theme-toggle" (click)="toggleTheme()">
+            <mat-icon>{{ themeService.isDarkMode() ? 'light_mode' : 'dark_mode' }}</mat-icon>
+        </button>
+        <a routerLink="/" class="nav-link" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">Home</a>
+        <a routerLink="/projects" class="nav-link" routerLinkActive="active">Projects</a>
+        <a class="nav-link btn-primary">Get Started</a>
+    </div>
+</nav>
