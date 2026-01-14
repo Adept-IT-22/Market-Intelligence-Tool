@@ -18,6 +18,7 @@ interface ChatThread {
   isLoading?: boolean;
   loadingStep?: string;
   isTyping?: boolean;
+  executionTime?: number;
 }
 
 @Component({
@@ -29,6 +30,7 @@ interface ChatThread {
 })
 export class MainSearchComponent implements AfterViewChecked {
   @ViewChild('scrollContainer') private scrollContainer!: ElementRef;
+  @ViewChild('queryInput') private queryInput!: ElementRef; // Reference to input for focus
 
   query: string = '';
   threads: ChatThread[] = [];
@@ -86,6 +88,7 @@ export class MainSearchComponent implements AfterViewChecked {
       next: (res: any) => {
         newThread.isLoading = false;
         newThread.isTyping = true;
+        newThread.executionTime = res.execution_time; // Capture execution time
 
         newThread.aiMessage = {
           content: '',
@@ -104,6 +107,20 @@ export class MainSearchComponent implements AfterViewChecked {
         };
       }
     });
+  }
+
+  copyResponse(content: string) {
+    navigator.clipboard.writeText(content).then(() => {
+      // Optional: Add toast notification
+    });
+  }
+
+  editQuery(content: string) {
+    this.query = content;
+    setTimeout(() => {
+      this.queryInput.nativeElement.focus();
+      // this.queryInput.nativeElement.select(); // Optional: select all text
+    }, 0);
   }
 
   private cycleLoadingSteps(thread: ChatThread) {

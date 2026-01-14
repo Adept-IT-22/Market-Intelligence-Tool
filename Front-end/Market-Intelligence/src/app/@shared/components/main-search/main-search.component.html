@@ -18,6 +18,9 @@
                 </div>
                 <div class="node-content user-content locked">
                     <div class="query-text">{{ thread.userMessage.content }}</div>
+                    <button class="action-btn edit-btn" (click)="editQuery(thread.userMessage.content)" title="Edit Query">
+                        <mat-icon>edit</mat-icon>
+                    </button>
                 </div>
             </div>
 
@@ -46,6 +49,18 @@
                     <div class="response-text" *ngIf="!thread.isLoading && thread.aiMessage">
                         <markdown [data]="thread.aiMessage.content"></markdown>
                         <span *ngIf="thread.isTyping" class="cursor">|</span>
+
+                        <!-- Response Footer -->
+                        <div class="response-footer" *ngIf="!thread.isTyping">
+                            <span class="time-taken" *ngIf="thread.executionTime">
+                                <mat-icon>timer</mat-icon> {{ thread.executionTime }}s
+                            </span>
+                            <div class="actions">
+                                <button class="action-btn" (click)="copyResponse(thread.aiMessage.content)" title="Copy Response">
+                                    <mat-icon>content_copy</mat-icon>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -56,7 +71,7 @@
     <!-- Sticky Input Container -->
     <div class="input-container">
         <div class="input-wrapper">
-            <textarea class="search-input" rows="1" [(ngModel)]="query" placeholder="Message Intelligence..."
+            <textarea #queryInput class="search-input" rows="1" [(ngModel)]="query" placeholder="Message Intelligence..."
                 (keydown.enter)="$event.preventDefault(); sendQuery()"></textarea>
 
             <button class="send-btn" [disabled]="!query.trim() || isLoading" (click)="sendQuery()">
