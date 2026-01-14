@@ -15,7 +15,7 @@ import { environment } from '../../../../environments/environment';
 })
 export class MainSearchComponent {
   query: string = '';
-  response: any;
+  response: any = null;
   isLoading: boolean = false;
 
   constructor(private http: HttpClient) { }
@@ -24,7 +24,7 @@ export class MainSearchComponent {
     if (!this.query.trim()) return;
 
     this.isLoading = true;
-    this.response = null; // Clear previous response
+    this.response = null;
 
     const payload = { query: this.query };
     this.http.post(`${environment.apiUrl}/query`, payload).subscribe({
@@ -35,7 +35,6 @@ export class MainSearchComponent {
       error: (err) => {
         console.error('Error fetching data', err);
         this.isLoading = false;
-        // Optional: Handle error state in UI
         this.response = { Results: "⚠️ Error: Could not reach the intelligence engine. Please try again later." };
       }
     });
