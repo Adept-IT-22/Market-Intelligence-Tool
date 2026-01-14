@@ -208,3 +208,13 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Qdrant
+qdrant_server/
+storage/
+qdrant.zip
+.qdrant-initialized
+
+# Project Metadata
+.gemini/
+.agent/
