@@ -23,7 +23,7 @@
 .toggle-btn {
     background: none;
     border: none;
-    color: var(--text-secondary);
+    color: var(--text-primary);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -80,6 +80,52 @@
         background-color: var(--accent-gradient);
         color: white;
         box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+
+        mat-icon {
+            color: white !important;
+        }
+    }
+}
+
+/* Explicit Light Mode Override */
+/* Explicit Light Mode Override */
+:host-context(.light-mode) {
+    .sidebar-component {
+        background-color: #ffffff;
+        /* Ensure white bg */
+        border-right: 1px solid #e4e4e7;
+    }
+
+    .nav-item {
+        color: #18181b !important;
+        /* Force dark text */
+
+        mat-icon {
+            color: #18181b !important;
+            /* Force dark icon */
+        }
+
+        &:hover {
+            background-color: #f4f4f5 !important;
+        }
+
+        &.active {
+            color: #ffffff !important;
+            /* Keep white on active */
+            background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%) !important;
+
+            mat-icon {
+                color: #ffffff !important;
+            }
+        }
+    }
+
+    .toggle-btn {
+        color: #18181b !important;
+
+        &:hover {
+            background-color: #f4f4f5;
+        }
     }
 }
 
