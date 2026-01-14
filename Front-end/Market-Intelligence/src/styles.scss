@@ -1,7 +1,88 @@
-/* You can add global styles to this file, and also import other style files */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap');
 
-html, body { height: 100%; }
-body { margin: 0; font-family: Roboto, "Century Gothic", sans-serif; }
+:root {
+    /* Dark Theme (Default) */
+    --bg-primary: #0a0a0f;
+    --bg-secondary: #14141e;
+    --bg-accent: #1e1e2d;
 
-html, body { height: 100%; }
-body { margin: 0; font-family: Roboto, "Helvetica Neue", sans-serif; }
+    --text-primary: #f4f4f5;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+
+    --accent-primary: #7c3aed;
+    --accent-secondary: #4f46e5;
+    --accent-gradient: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
+
+    --border-color: rgba(255, 255, 255, 0.1);
+    --glass-bg: rgba(20, 20, 30, 0.7);
+    --glass-border: rgba(255, 255, 255, 0.08);
+
+    /* Spacing */
+    --sidebar-width: 260px;
+    --sidebar-collapsed: 80px;
+    --navbar-height: 72px;
+
+    /* Transitions */
+    --transition-fast: 200ms ease;
+    --transition-base: 300ms ease;
+}
+
+.light-mode {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f4f4f5;
+    --bg-accent: #e4e4e7;
+
+    --text-primary: #09090b;
+    --text-secondary: #3f3f46;
+    --text-muted: #71717a;
+
+    --border-color: rgba(0, 0, 0, 0.1);
+    --glass-bg: rgba(255, 255, 255, 0.8);
+    --glass-border: rgba(0, 0, 0, 0.05);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body {
+    height: 100%;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    overflow: hidden;
+}
+
+body {
+    transition: background-color var(--transition-base), color var(--transition-base);
+}
+
+h1,
+h2,
+h3,
+h4,
+.product-text {
+    font-family: 'Outfit', sans-serif;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--bg-accent);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}

@@ -1,16 +1,19 @@
-<div class="sidebar-component">
-    <button class="sidebar-button" mat-icon-button (click)="toggleSidebar()">
-        <mat-icon>menu</mat-icon>
-    </button>
-
-    <div class="sidebar-content" [ngClass]="{'closed': !isExpanded}">
-        <ul *ngFor="let item of menuItems">
-            <li>
-                <mat-icon>{{item.icon}}</mat-icon>
-                <a>{{item.name}}</a>
-            </li>
-            
-        </ul>
+<div class="sidebar-component" [ngClass]="{'closed': !isExpanded}">
+    <div class="sidebar-header">
+        <button class="toggle-btn" (click)="toggleSidebar()">
+            <mat-icon>{{ isExpanded ? 'menu_open' : 'menu' }}</mat-icon>
+        </button>
     </div>
-    
+
+    <div class="sidebar-content">
+        <a *ngFor="let item of menuItems" [routerLink]="item.route" routerLinkActive="active"
+            [routerLinkActiveOptions]="{exact: true}" class="nav-item">
+            <mat-icon>{{item.icon}}</mat-icon>
+            <span *ngIf="isExpanded">{{item.name}}</span>
+        </a>
+    </div>
+
+    <div class="sidebar-footer" *ngIf="isExpanded">
+        <p>&copy; 2026 El Gringo Analytics</p>
+    </div>
 </div>

@@ -1,11 +1,15 @@
 <div class="base-layout-component">
-    <div class="sidebar-component">
+    <div class="sidebar-container">
         <app-sidebar />
     </div>
-    
-    <div class="main-content">
-        <router-outlet>
+
+    <div class="content-wrapper">
+        <div class="navbar-container">
+            <app-navbar />
+        </div>
+
+        <main class="main-content">
             <ng-content></ng-content>
-        </router-outlet>
+        </main>
     </div>
 </div>
