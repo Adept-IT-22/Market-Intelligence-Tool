@@ -43,7 +43,7 @@ export class MainSearchComponent implements AfterViewChecked {
   constructor(private http: HttpClient) { }
 
   get isLoading(): boolean {
-    return this.threads.some(t => t.isLoading);
+    return this.threads?.some(t => t.isLoading) ?? false;
   }
 
   ngAfterViewChecked() {
