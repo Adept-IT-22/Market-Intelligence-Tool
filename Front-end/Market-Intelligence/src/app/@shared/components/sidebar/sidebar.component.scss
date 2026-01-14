@@ -52,7 +52,8 @@
     gap: 12px;
     padding: 12px;
     border-radius: 12px;
-    color: var(--text-secondary);
+    color: var(--text-primary);
+    /* Changed to primary for better visibility in light mode */
     text-decoration: none;
     transition: var(--transition-fast);
     white-space: nowrap;
@@ -61,6 +62,8 @@
         font-size: 20px;
         width: 20px;
         height: 20px;
+        color: inherit;
+        /* Ensure icon takes the text color */
     }
 
     span {

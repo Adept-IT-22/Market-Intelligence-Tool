@@ -51,7 +51,7 @@ def run_query()->Dict:
         duration = time.perf_counter() - start_time
         logger.info(f"This task took {duration:.2f} seconds")
         logger.info(f"Type of results['text'] is: {type(results)}")
-        return {"Results": str(results)}
+        return {"Results": str(results), "execution_time": round(duration, 2)}
 
     except Exception as e:
         logger.error(f"Couldn't run the query: {str(e)}")
