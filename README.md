@@ -18,11 +18,13 @@ A high-performance, AI-driven analytics platform designed to provide deep insigh
 - **Smart Routing**: Hybrid retrieval logic that combines structured SQL data with unstructured vector context.
 
 ### 🎨 Premium UI/UX
-- **Modern Chat Interface**: A "Chat-First" user experience inspired by industry-leading AI tools.
-- **Dark/Light Mode**: Full theme support with seamless transitions, managed via Angular Signals.
+- **Threaded Chat Tree**: Visual conversation history connecting user queries and AI responses with threaded connectors.
+- **Interactive Actions**: Edit previous queries, copy AI responses, and view execution time metrics directly in the chat.
+- **Typing Animations**: GSAP-powered typewriter effects for natural, streaming-like text delivery.
+- **Dark/Light Mode**: Full theme support with high-contrast visibility for sidebar, managed via Angular Signals.
 - **Glassmorphism Design**: Sleek, modern aesthetics with backdrop-blur effects and premium typography (`Inter` & `Outfit`).
 - **Responsive Layout**: Sticky navigation and a collapsible sidebar for efficient workflow.
-- **Skeleton Loading**: Smooth animations provide immediate feedback during data synthesis.
+- **Enhanced Loading**: Dynamic step indicators ("Scanning...", "Synthesizing...") providing granular feedback.
 
 ---
 
