@@ -57,7 +57,9 @@ export class MainSearchComponent implements AfterViewChecked {
       if (this.scrollContainer) {
         this.scrollContainer.nativeElement.scrollTop = this.scrollContainer.nativeElement.scrollHeight;
       }
-    } catch (err) { }
+    } catch (err) {
+      console.error('Failed to scroll to bottom in MainSearchComponent.scrollToBottom:', err);
+    }
   }
 
   sendQuery() {
