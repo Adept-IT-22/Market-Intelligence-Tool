@@ -1,10 +1,25 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component } from '@angular/core';
+import { Component, ElementRef, ViewChild, AfterViewChecked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { MarkdownModule } from 'ngx-markdown';
 import { environment } from '../../../../environments/environment';
+import { gsap } from 'gsap';
+
+interface ChatMessage {
+  content: string;
+  timestamp: Date;
+}
+
+interface ChatThread {
+  userMessage: ChatMessage;
+  aiMessage?: ChatMessage;
+  isLoading?: boolean;
+  loadingStep?: string;
+  isTyping?: boolean;
+  executionTime?: number;
+}
 
 @Component({
   selector: 'app-main-search',
@@ -13,29 +28,167 @@ import { environment } from '../../../../environments/environment';
   templateUrl: './main-search.component.html',
   styleUrl: './main-search.component.scss'
 })
-export class MainSearchComponent {
+export class MainSearchComponent implements AfterViewChecked {
+  @ViewChild('scrollContainer') private scrollContainer!: ElementRef;
+  @ViewChild('queryInput') private queryInput!: ElementRef; // Reference to input for focus
+
   query: string = '';
-  response: any = null;
-  isLoading: boolean = false;
+  threads: ChatThread[] = [];
+
+  private loadingSteps = [
+    "Analyzing your request...",
+    "Scanning market databases...",
+    "Retrieving vector context...",
+    "Synthesizing insights..."
+  ];
 
   constructor(private http: HttpClient) { }
+
+  get isLoading(): boolean {
+    return this.threads?.some(t => t.isLoading) ?? false;
+  }
+
+  ngAfterViewChecked() {
+    this.scrollToBottom();
+  }
+
+  scrollToBottom(): void {
+    try {
+      if (this.scrollContainer) {
+        this.scrollContainer.nativeElement.scrollTop = this.scrollContainer.nativeElement.scrollHeight;
+      }
+    } catch (err) {
+      console.error('Failed to scroll to bottom in MainSearchComponent.scrollToBottom:', err);
+    }
+  }
 
   sendQuery() {
     if (!this.query.trim()) return;
 
-    this.isLoading = true;
-    this.response = null;
+    // 1. Create New Thread
+    const newThread: ChatThread = {
+      userMessage: {
+        content: this.query,
+        timestamp: new Date()
+      },
+      isLoading: true,
+      loadingStep: this.loadingSteps[0]
+    };
 
-    const payload = { query: this.query };
+    this.threads.push(newThread);
+
+    // Save context
+    const distinctQuery = this.query;
+    this.query = '';
+
+    // 2. Start Loading Cycle for this specific thread
+    this.cycleLoadingSteps(newThread);
+
+    // 3. Call API
+    const payload = { query: distinctQuery };
     this.http.post(`${environment.apiUrl}/query`, payload).subscribe({
       next: (res: any) => {
-        this.response = res;
-        this.isLoading = false;
+        newThread.isLoading = false;
+        newThread.isTyping = true;
+        newThread.executionTime = res.execution_time; // Capture execution time
+
+        newThread.aiMessage = {
+          content: '',
+          timestamp: new Date()
+        };
+
+        // 4. Trigger GSAP Typewriter
+        this.typewriteResponse(newThread, res.Results);
       },
       error: (err) => {
         console.error('Error fetching data', err);
-        this.isLoading = false;
-        this.response = { Results: "⚠️ Error: Could not reach the intelligence engine. Please try again later." };
+        newThread.isLoading = false;
+        newThread.aiMessage = {
+          content: "⚠️ Error: Could not reach the intelligence engine. Please try again later.",
+          timestamp: new Date()
+        };
+      }
+    });
+  }
+
+  copyResponse(content: string) {
+    // Prefer modern async clipboard API when available
+    if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      navigator.clipboard.writeText(content)
+        .then(() => {
+          // Optional: Add toast notification
+        })
+        .catch((err) => {
+          console.error('Clipboard copy failed', err);
+          window.alert('Failed to copy to clipboard. Please copy the text manually.');
+        });
+      return;
+    }
+
+    // Fallback for environments without navigator.clipboard
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = content;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '0';
+      textarea.style.top = '0';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+
+      const successful = document.execCommand('copy');
+      document.body.removeChild(textarea);
+
+      if (!successful) {
+        window.alert('Failed to copy to clipboard. Please copy the text manually.');
+      }
+    } catch (err) {
+      console.error('Clipboard copy fallback failed', err);
+      window.alert('Failed to copy to clipboard. Please copy the text manually.');
+    }
+  }
+
+  editQuery(content: string) {
+    this.query = content;
+    setTimeout(() => {
+      this.queryInput.nativeElement.focus();
+      // this.queryInput.nativeElement.select(); // Optional: select all text
+    }, 0);
+  }
+
+  private cycleLoadingSteps(thread: ChatThread) {
+    let stepIndex = 0;
+
+    const interval = setInterval(() => {
+      if (!thread.isLoading) {
+        clearInterval(interval);
+        return;
+      }
+      stepIndex = (stepIndex + 1) % this.loadingSteps.length;
+      thread.loadingStep = this.loadingSteps[stepIndex];
+    }, 2000);
+  }
+
+  private typewriteResponse(thread: ChatThread, fullText: string) {
+    const proxy = { value: 0 };
+    const duration = Math.min(fullText.length * 0.005, 10);
+
+    gsap.to(proxy, {
+      value: fullText.length,
+      duration: duration,
+      ease: "none",
+      onUpdate: () => {
+        const charIndex = Math.floor(proxy.value);
+        if (thread.aiMessage) {
+          thread.aiMessage.content = fullText.substring(0, charIndex);
+        }
+      },
+      onComplete: () => {
+        if (thread.aiMessage) {
+          thread.aiMessage.content = fullText;
+        }
+        thread.isTyping = false;
       }
     });
   }

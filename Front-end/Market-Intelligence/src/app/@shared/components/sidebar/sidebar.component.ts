@@ -11,10 +11,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
 })
 export class SidebarComponent {
   menuItems = [
-    { "name": "Home", "icon": "home", "route": "/" },
-    { "name": "Analytics", "icon": "insights", "route": "/analytics" },
-    { "name": "Projects", "icon": "work_outline", "route": "/projects" },
-    { "name": "User Manual", "icon": "menu_book", "route": "/user-manual" }
+    { "name": "Start New Chat", "icon": "add_comment", "route": "/" }
   ]
 
   isExpanded: boolean = true;

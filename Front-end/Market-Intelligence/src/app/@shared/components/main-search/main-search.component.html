@@ -1,36 +1,77 @@
-<div class="search-page" [class.has-response]="response || isLoading">
+<div class="search-page" [class.has-response]="threads.length > 0 || isLoading">
 
     <!-- Hero section shown when no activity -->
-    <div class="hero-section" *ngIf="!response && !isLoading">
+    <div class="hero-section" *ngIf="threads.length === 0 && !isLoading">
         <h1>Market Intelligence</h1>
         <p>Ask anything about the Kenyan market and let data guide your decisions.</p>
     </div>
 
     <!-- Chat/Response Area -->
-    <div class="chat-area" *ngIf="response || isLoading">
-        <div class="message user-message" *ngIf="query">
-            <div class="message-content">{{ query }}</div>
-        </div>
+    <div class="chat-area" #scrollContainer *ngIf="threads.length > 0">
 
-        <div class="message ai-message" *ngIf="isLoading">
-            <div class="loading-skeleton">
-                <div class="skeleton-line"></div>
-                <div class="skeleton-line short"></div>
-                <div class="skeleton-line"></div>
+        <div *ngFor="let thread of threads" class="chat-thread">
+
+            <!-- 1. User Query Node (Locked) -->
+            <div class="thread-node user-node">
+                <div class="node-icon user-icon">
+                    <mat-icon>person</mat-icon>
+                </div>
+                <div class="node-content user-content locked">
+                    <div class="query-text">{{ thread.userMessage.content }}</div>
+                    <button class="action-btn edit-btn" (click)="editQuery(thread.userMessage.content)" title="Edit Query">
+                        <mat-icon>edit</mat-icon>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Connector Line -->
+            <div class="thread-connector"></div>
+
+            <!-- 2. AI Response Node -->
+            <div class="thread-node ai-node">
+                <!-- Icon -->
+                <div class="node-icon ai-icon" [class.pulsing]="thread.isLoading">
+                    <mat-icon>{{ thread.isLoading ? 'sync' : 'smart_toy' }}</mat-icon>
+                </div>
+
+                <!-- Content -->
+                <div class="node-content ai-content">
+
+                    <!-- Loading State -->
+                    <div class="loading-indicator" *ngIf="thread.isLoading">
+                        <span class="step-text">{{ thread.loadingStep }}</span>
+                        <div class="progress-bar">
+                            <div class="progress-fill"></div>
+                        </div>
+                    </div>
+
+                    <!-- Actual Response -->
+                    <div class="response-text" *ngIf="!thread.isLoading && thread.aiMessage">
+                        <markdown [data]="thread.aiMessage.content"></markdown>
+                        <span *ngIf="thread.isTyping" class="cursor">|</span>
+
+                        <!-- Response Footer -->
+                        <div class="response-footer" *ngIf="!thread.isTyping">
+                            <span class="time-taken" *ngIf="thread.executionTime">
+                                <mat-icon>timer</mat-icon> {{ thread.executionTime }}s
+                            </span>
+                            <div class="actions">
+                                <button class="action-btn" (click)="copyResponse(thread.aiMessage.content)" title="Copy Response">
+                                    <mat-icon>content_copy</mat-icon>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div class="message ai-message" *ngIf="response">
-            <div class="message-content">
-                <markdown [data]="response.Results"></markdown>
-            </div>
-        </div>
     </div>
 
     <!-- Sticky Input Container -->
     <div class="input-container">
         <div class="input-wrapper">
-            <textarea class="search-input" rows="1" [(ngModel)]="query" placeholder="Message Intelligence..."
+            <textarea #queryInput class="search-input" rows="1" [(ngModel)]="query" placeholder="Message Intelligence..."
                 (keydown.enter)="$event.preventDefault(); sendQuery()"></textarea>
 
             <button class="send-btn" [disabled]="!query.trim() || isLoading" (click)="sendQuery()">
