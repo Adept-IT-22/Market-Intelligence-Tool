@@ -168,10 +168,10 @@ class AgentManager:
         # Format Qdrant Context
         qdrant_context = ""
         for point in qdrant_results:
-            if hasattr(point, 'payload'):
-                qdrant_context += f"- {point.payload}\n"
-            else:
-                qdrant_context += f"- {point}\n"
+            payload = point.payload or {}
+            summary = payload.get("summary") or payload.get("content", "")
+            qdrant_context += f"- {summary[:500]}\n"
+
 
         # Format SQL Context (Limit length)
         sql_context = ""
