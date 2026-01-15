@@ -310,8 +310,6 @@
 }
 
 .input-container {
-    position: absolute;
-    /* Changed from fixed to absolute to stick within relative parent if needed, or fixed if global */
     position: fixed;
     bottom: 0;
     left: 50%;
