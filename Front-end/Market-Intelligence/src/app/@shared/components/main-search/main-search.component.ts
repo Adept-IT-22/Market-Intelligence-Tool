@@ -110,9 +110,41 @@ export class MainSearchComponent implements AfterViewChecked {
   }
 
   copyResponse(content: string) {
-    navigator.clipboard.writeText(content).then(() => {
-      // Optional: Add toast notification
-    });
+    // Prefer modern async clipboard API when available
+    if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      navigator.clipboard.writeText(content)
+        .then(() => {
+          // Optional: Add toast notification
+        })
+        .catch((err) => {
+          console.error('Clipboard copy failed', err);
+          window.alert('Failed to copy to clipboard. Please copy the text manually.');
+        });
+      return;
+    }
+
+    // Fallback for environments without navigator.clipboard
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = content;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '0';
+      textarea.style.top = '0';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+
+      const successful = document.execCommand('copy');
+      document.body.removeChild(textarea);
+
+      if (!successful) {
+        window.alert('Failed to copy to clipboard. Please copy the text manually.');
+      }
+    } catch (err) {
+      console.error('Clipboard copy fallback failed', err);
+      window.alert('Failed to copy to clipboard. Please copy the text manually.');
+    }
   }
 
   editQuery(content: string) {
