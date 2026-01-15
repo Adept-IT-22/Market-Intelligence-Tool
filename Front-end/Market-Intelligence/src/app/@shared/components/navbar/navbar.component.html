@@ -9,8 +9,6 @@
         <button class="nav-link theme-toggle" (click)="toggleTheme()">
             <mat-icon>{{ themeService.isDarkMode() ? 'light_mode' : 'dark_mode' }}</mat-icon>
         </button>
-        <a routerLink="/" class="nav-link" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">Home</a>
-        <a routerLink="/projects" class="nav-link" routerLinkActive="active">Projects</a>
-        <a class="nav-link btn-primary">Get Started</a>
+        <!-- <a routerLink="/" class="nav-link" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">Home</a> -->
     </div>
 </nav>
