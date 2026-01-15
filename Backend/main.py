@@ -25,16 +25,18 @@ logger.info(f"Connecting to Qdrant at {qdrant_url}")
 
 #query="I'm a farmer in Limuru and want to explore selling my excess maize stock. How might I go about doing that and am i in the right location?")
 
-@app.route('/query', methods=["GET"])
+@app.route('/query', methods=["POST"])
 def run_query()->Dict:
     start_time = time.perf_counter()
     logger.info("Running Query...")
 
-    user_query = request.args.get("q")
+    # Get data from JSON body
+    data = request.json
+    user_query = data.get("query")
 
     if not user_query:
         logger.error("No query found")
-        return {"error": "Missing query"}, 400
+        return {"error": "Missing 'query' field in JSON body"}, 400
 
     logger.info(f"Running query: {user_query}")
     
@@ -49,7 +51,7 @@ def run_query()->Dict:
         duration = time.perf_counter() - start_time
         logger.info(f"This task took {duration:.2f} seconds")
         logger.info(f"Type of results['text'] is: {type(results)}")
-        return {"Results": str(results)}
+        return {"Results": str(results), "execution_time": round(duration, 2)}
 
     except Exception as e:
         logger.error(f"Couldn't run the query: {str(e)}")
