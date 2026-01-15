@@ -14,6 +14,7 @@ services:
       - QDRANT_PORT=6333
     networks:
       - market_intelligence_network
+    restart: always
 
 networks:
   market_intelligence_network:
