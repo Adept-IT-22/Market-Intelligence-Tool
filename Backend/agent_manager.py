@@ -89,24 +89,40 @@ class AgentManager:
         conn.close()
         return schema
 
-    def get_master_response(self):
-        logger.info("Determining relevant data sources (Routing)...")
+    def get_master_routing(self):
+        """
+        Level 1: Query Master table to find relevant Routing Tables.
+        """
+        logger.info("Level 1: Master Table Routing...")
         master_schema = self.get_table_schema(table_name='Master')
         
+        # We need to fetch the ROWS, not just Schema, to reason about content? 
+        # Or better, fetch all rows from Master and let LLM decide. 
+        # Master is small (Menu), so we can fetch all.
+        conn = sqlite3.connect(self.database_path)
+        df_master = pd.read_sql_query("SELECT id, Title, Source, Summary, Datatype, Sectors, table_name FROM Master", conn)
+        conn.close()
+        
+        if df_master.empty:
+            logger.warning("Master table is empty.")
+            return []
+
+        master_context = df_master.to_string(index=False)
+
         system_prompt = (
-            "You are a highly capable database router. "
-            "Your task is to identify relevant SQL tables from the schema based on the user's query. "
-            "Return ONLY a comma-separated list of 'table_name' values. Step-by-step reasoning is NOT allowed."
+            "You are a Data Architect. Your goal is to select relevant 'Routing Tables' from the Master Menu. "
+            "Analyze the User Query and the Master Table. "
+            "Return a comma-separated list of 'table_name' that are most relevant. "
+            "If nothing is relevant, return nothing."
         )
-        
+
         user_prompt = f"""
-        Database Schema (Master Table): {master_schema}
-        
         User Query: "{self.query}"
         
-        Task: Select table names that are relevant to the query.
-        Output Format: table1,table2
-        If no tables are relevant, return nothing.
+        --- Master Table (Menu) ---
+        {master_context}
+        
+        Output Format: table_name1, table_name2
         """
 
         try:
@@ -119,77 +135,166 @@ class AgentManager:
                 temperature=0.0
             )
             content = response.choices[0].message.content.strip()
-            # Clean up
-            tables = [t.strip().strip('"').strip("'") for t in content.split(',') if t.strip()]
-            logger.info(f"Identified Tables: {tables}")
+            # Clean
+            routing_tables = [t.strip().strip('"').strip("'") for t in content.split(',') if t.strip()]
             
-            # Group by Datatype if needed, or just return list. 
-            # Existing logic used a dict, let's replicate that for compatibility if needed, 
-            # or simplify. The robust logic I wrote earlier put them in a dict based on 'Datatype'.
+            # Verify they exist in our list
+            valid_tables = df_master['table_name'].tolist()
+            final_tables = [t for t in routing_tables if t in valid_tables]
             
-            conn = sqlite3.connect(self.database_path)
-            cursor = conn.cursor()
-            result_dict = {'SQL': [], 'QDrant': []} # Simplified structure
-            
-            for table in tables:
-                cursor.execute("SELECT Datatype FROM Master WHERE table_name = ?", (table,))
-                row = cursor.fetchone()
-                if row:
-                    # In this DB, Datatype is the key? Or just a property.
-                    # Looking at previous logs: result_dict.setdefault(datatype_str, []).append(table)
-                    # Let's map it:
-                    datatype = row[0]
-                    # Assuming 'SQL' or 'QDrant' might be values?
-                    # Let's just put everything in SQL for now if it's a table we can query.
-                    if datatype and 'Start' in datatype: # Just guessing or generic
-                         pass
-                    
-                    # SIMPLIFICATION: usage of result_dict was complex.
-                    # Let's just assume these are SQL tables for detail retrieval
-                    result_dict['SQL'].append(table)
-            
-            conn.close()
-            return result_dict
-
+            logger.info(f"Level 1 Selected: {final_tables}")
+            return final_tables
         except Exception as e:
-            logger.error(f"Routing failed: {e}")
-            return {}
+            logger.error(f"Master Routing failed: {e}")
+            return []
 
-    def get_final_response(self, qdrant_results, detail_tables):
-        logger.info("Synthesizing Final Response...")
+    def get_routing_response(self, routing_tables: list):
+        """
+        Level 2: Open Routing Tables to find specific Details (SQL Tables or Qdrant Points).
+        """
+        logger.info(f"Level 2: Scanning Routing Tables ({len(routing_tables)})...")
+        if not routing_tables:
+            return {'SQL': [], 'Qdrant': []}
+
+        conn = sqlite3.connect(self.database_path)
+        combined_routing_data = ""
         
+        # We aggregate all candidates from all selected routing tables
+        # To avoid context overflow, we might limit this.
+        for r_table in routing_tables:
+            try:
+                df = pd.read_sql_query(f"SELECT * FROM {r_table}", conn)
+                combined_routing_data += f"\n--- Source: {r_table} ---\n{df.to_string(index=False)}\n"
+            except Exception as e:
+                logger.warning(f"Could not read routing table {r_table}: {e}")
+        conn.close()
+
+        if not combined_routing_data:
+            return {'SQL': [], 'Qdrant': []}
+
         system_prompt = (
-            "You are an expert Market Intelligence Analyst for Kenya. "
-            "Synthesize the provided Data Sources (SQL) and Context (Vector Search) to answer the User Query. "
-            "Be precise, cite your sources (e.g. 'According to [Table Name]...'), and provide actionable insights. "
-            "If data is missing, clearly state it."
+            "You are a Precision Data Scout. "
+            "Review the specific entries from the selected sources (Routing Tables). "
+            "Identify the specific 'table_name' (for SQL/Excel) or 'qdrant_point_id' (for Text) that contain the answer. "
+            "Return a JSON object with two keys: 'sql_tables' (list of strings) and 'qdrant_ids' (list of strings)."
         )
-        
-        # Format Qdrant Context
-        qdrant_context = ""
-        for point in qdrant_results:
-            if hasattr(point, 'payload'):
-                qdrant_context += f"- {point.payload}\n"
-            else:
-                qdrant_context += f"- {point}\n"
-
-        # Format SQL Context (Limit length)
-        sql_context = ""
-        for table, data in detail_tables.items():
-            sql_context += f"\nTable: {table}\nData (Sample):\n{str(data)[:2000]}\n"
 
         user_prompt = f"""
         User Query: "{self.query}"
         
-        --- SQL Data Sources ---
-        {sql_context}
+        --- Routing Data ---
+        {combined_routing_data}
         
-        --- Vector Search Context ---
-        {qdrant_context}
-        
-        Please provide a comprehensive response in Markdown.
+        Output JSON: {{ "sql_tables": ["name1", ...], "qdrant_ids": ["id1", ...] }}
         """
 
+        try:
+            response = self.client.chat.completions.create(
+                model=self.llm_model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"}
+            )
+            import json
+            result = json.loads(response.choices[0].message.content)
+            logger.info(f"Level 2 Selected: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Routing logic failed: {e}")
+            return {'SQL': [], 'Qdrant': []}
+
+    def get_detail_content(self, selection: dict):
+        """
+        Level 3: Fetch actual content.
+        """
+        logger.info("Level 3: Fetching Detail Content...")
+        context = ""
+        
+        # 1. Fetch SQL Details
+        sql_tables = selection.get('sql_tables', [])
+        if sql_tables:
+            conn = sqlite3.connect(self.database_path)
+            for table in sql_tables:
+                try:
+                    df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                    context += f"\n### Data Table: {table}\n{df.to_string(index=False)}\n"
+                except Exception as e:
+                    logger.error(f"Error reading Detail SQL {table}: {e}")
+            conn.close()
+            
+        # 2. Fetch Qdrant Details
+        qdrant_ids = selection.get('qdrant_ids', [])
+        if qdrant_ids:
+            try:
+                points = self.qdrant_client.retrieve(
+                    collection_name=self.collection_name,
+                    ids=qdrant_ids
+                )
+                for point in points:
+                    payload = point.payload
+                    # Assuming payload has 'text' or we construct it
+                    text_content = payload.get('text') or str(payload)
+                    source = payload.get('source', 'Unknown')
+                    context += f"\n### Text Source: {source}\n{text_content}\n"
+            except Exception as e:
+                logger.error(f"Error retrieving Qdrant points: {e}")
+                
+        return context
+
+    def pipeline(self):
+        logger.info("Starting V2 3-Level Implementation Plan Pipeline")
+        
+        # Step 1: Master -> Routing Tables
+        routing_tables = self.get_master_routing()
+        
+        # Step 2: Routing Tables -> Specific Details
+        selection = self.get_routing_response(routing_tables)
+        
+        # Step 3: Fetch Details
+        detail_context = self.get_detail_content(selection)
+        
+        # Step 4: Hybrid Search (Safety Net) - Run standard Semantic Search as well
+        # This catches things the hierarchical drill-down might miss
+        semantic_results = self.search_qdrant(top_k=3)
+        semantic_context = ""
+        for point in semantic_results:
+             payload = point.payload
+             text = payload.get('text', str(payload))
+             semantic_context += f"- [Semantic Match]: {text}\n"
+
+        # Final Synthesis
+        return self.get_final_response(semantic_results, {"Hierarchical Data": detail_context, "Semantic Data": semantic_context})
+
+    def get_final_response(self, _, context_dict):
+        # Overriding the signature slightly to fit the new flow
+        logger.info("Synthesizing V2 Response...")
+        
+        hierarchical_data = context_dict.get("Hierarchical Data", "")
+        semantic_data = context_dict.get("Semantic Data", "")
+        
+        system_prompt = (
+            "You are an expert Market Intelligence Analyst for Kenya. "
+            "Synthesize the provided data to answer the User Query. "
+            "The data comes from a Deep Drill-Down (Hierarchical) and a Broad Sweep (Semantic). "
+            "Prioritize the specific tabular data found in the Drill-Down. "
+            "Cite your sources precisely."
+        )
+        
+        user_prompt = f"""
+        User Query: "{self.query}"
+        
+        === Deep Dive Data (High Confidence) ===
+        {hierarchical_data}
+        
+        === Semantic Search Context (Broad Context) ===
+        {semantic_data}
+        
+        Provide a detailed, Markdown-formatted answer.
+        """
+        
         try:
             response = self.client.chat.completions.create(
                 model=self.llm_model_name,
@@ -202,31 +307,4 @@ class AgentManager:
             return response.choices[0].message.content
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
-            return "I encountered an error generating the response."
-
-    def pipeline(self):
-        logger.info("Starting Optimized Pipeline")
-        
-        # Parallel-ish: Get Master Routing
-        master_dict = self.get_master_response()
-        
-        # Fetch Details
-        detail_data = {}
-        conn = sqlite3.connect(self.database_path)
-        
-        if 'SQL' in master_dict:
-            for table in master_dict['SQL']:
-                try:
-                    # Limit rows for context management
-                    df = pd.read_sql_query(f'SELECT * FROM "{table}" LIMIT 10', conn)
-                    # Use to_markdown or string
-                    detail_data[table] = df.to_string(index=False)
-                except Exception as e:
-                    logger.error(f"Failed to read table {table}: {e}")
-        conn.close()
-
-        # Search Qdrant
-        qdrant_results = self.search_qdrant(top_k=5)
-
-        # Final Synthesis
-        return self.get_final_response(qdrant_results, detail_data)
+            return "I encountered an error generating the final response."
