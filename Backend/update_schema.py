@@ -48,29 +48,58 @@ def migrate_db():
         logger.info("Migrating existing entries from Master_Old to Master...")
         try:
             cursor.execute("SELECT * FROM Master_Old")
+            col_names = [desc[0] for desc in cursor.description] if cursor.description else []
             old_rows = cursor.fetchall()
-            
-            for row in old_rows:
-                # Attempt to map old schema
-                # Heuristic mapping based on common structure
-                try:
-                     # Minimal valid shape?
-                     if len(row) >= 4:
-                         old_table_name = row[1]
-                         old_date = row[3] if len(row) > 3 else "Unknown"
-                         old_title = row[4] if len(row) > 4 else old_table_name
-                         old_summary = row[5] if len(row) > 5 else ""
-                         old_sectors = row[6] if len(row) > 6 else "General"
-                         
-                         datatype = "File" 
-                         
-                         cursor.execute("""
+
+            if not col_names:
+                logger.warning("Could not determine columns for Master_Old. Skipping migration to avoid data loss.")
+            else:
+                for row in old_rows:
+                    row_dict = dict(zip(col_names, row))
+                    try:
+                        # Heuristic mapping
+                        old_table_name = (
+                            row_dict.get("table_name") or 
+                            row_dict.get("TableName") or 
+                            "Unknown"
+                        )
+                        
+                        old_date = (
+                            row_dict.get("Date") or 
+                            row_dict.get("upload_date") or 
+                            "Unknown"
+                        )
+                        
+                        old_title = (
+                            row_dict.get("Title") or 
+                            row_dict.get("title") or 
+                            old_table_name
+                        )
+                        
+                        old_summary = (
+                            row_dict.get("Summary") or 
+                            row_dict.get("summary") or 
+                            ""
+                        )
+                        
+                        old_sectors = (
+                            row_dict.get("Sectors") or 
+                            row_dict.get("sectors") or 
+                            "General"
+                        )
+                        
+                        # Existing entries are likely files
+                        datatype = "File"
+
+                        cursor.execute("""
                             INSERT INTO Master (Title, Source, Summary, Datatype, Sectors, table_name, Date)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
-                         """, (old_title, old_table_name, old_summary, datatype, old_sectors, old_table_name, old_date))
-                except Exception as e:
-                    logger.warning(f"Row migration skipped for {row}: {e}")
-                    continue
+                        """, (old_title, old_table_name, old_summary, datatype, old_sectors, old_table_name, old_date))
+                        
+                    except Exception as e:
+                        logger.warning(f"Row migration skipped for {row_dict}: {e}")
+                        continue
+                        
         except Exception as ex:
              logger.warning(f"Could not read Master_Old or it is empty: {ex}")
 
