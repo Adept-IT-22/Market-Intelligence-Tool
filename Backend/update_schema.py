@@ -43,47 +43,37 @@ def migrate_db():
                 Date TEXT
             )
         """)
-
-        # 3. Create Routing Table Templates (Level 2)
-        # We don't create "one table per source" yet, but we define the schema expectation here or 
-        # create a helper table to track routing tables if needed. 
-        # For now, the 'Master' table's 'table_name' column points to the Routing Table.
         
-        # Le's create a generic SQL Routing Table structure for reference/testing
-        # This is what a routing table logic will create dynamically
-        """
-        CREATE TABLE IF NOT EXISTS {routing_table_name} (
-            master_id INTEGER,
-            detail_id INTEGER PRIMARY KEY, # Local ID
-            Title TEXT,
-            Datatype TEXT,
-            Sectors TEXT,
-            table_name TEXT, # Points to Detail Table
-            FOREIGN KEY(master_id) REFERENCES Master(id)
-        )
-        """
-
-        # Let's migrated data from Master_Old to Master if possible, 
-        # BUT the schema is different and the old Master pointed directly to data.
-        # We will leave Master empty for now to be populated by the ingestion script properly.
-        # Or we can migrate the existing "files" as "Master" entries.
-        
+        # 3. Migration Logic
         logger.info("Migrating existing entries from Master_Old to Master...")
-        cursor.execute("SELECT * FROM Master_Old")
-        old_rows = cursor.fetchall()
-        # Old Schema: id, table_name, file_path, upload_date, Title, Summary, Sectors
-        # New Schema: id, Title, Source, Summary, Datatype, Sectors, table_name, Date
-        
-        for row in old_rows:
-            # Map old columns to new. 
-            # Note: Old table structure is a bit messy, let's look at check_db output
-            # (1, 'KNBS_AnnualStatisticalAbstract', ..., 'KNBS Annual Statistical Abstract', ...)
+        try:
+            cursor.execute("SELECT * FROM Master_Old")
+            old_rows = cursor.fetchall()
             
-            # Since I can't see exact column order from `check_db` output (it was truncated), 
-            # I will just create the table structure and let the ingestion script handle population 
-            # effectively restarting the index.
-            pass
-        
+            for row in old_rows:
+                # Attempt to map old schema
+                # Heuristic mapping based on common structure
+                try:
+                     # Minimal valid shape?
+                     if len(row) >= 4:
+                         old_table_name = row[1]
+                         old_date = row[3] if len(row) > 3 else "Unknown"
+                         old_title = row[4] if len(row) > 4 else old_table_name
+                         old_summary = row[5] if len(row) > 5 else ""
+                         old_sectors = row[6] if len(row) > 6 else "General"
+                         
+                         datatype = "File" 
+                         
+                         cursor.execute("""
+                            INSERT INTO Master (Title, Source, Summary, Datatype, Sectors, table_name, Date)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                         """, (old_title, old_table_name, old_summary, datatype, old_sectors, old_table_name, old_date))
+                except Exception as e:
+                    logger.warning(f"Row migration skipped for {row}: {e}")
+                    continue
+        except Exception as ex:
+             logger.warning(f"Could not read Master_Old or it is empty: {ex}")
+
         conn.commit()
         logger.info("Migration Schema Update Complete!")
         
