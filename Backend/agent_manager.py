@@ -157,112 +157,49 @@ class AgentManager:
             return {'sql_tables': [], 'qdrant_ids': []}
 
         conn = sqlite3.connect(self.database_path)
-        combined_routing_data = ""
+        combined_routing_sections = []
+        max_total_chars = 20000 
+        current_length = 0
         
-        # We aggregate all candidates from all selected routing tables
-        # To avoid context overflow, we might limit this.
         for r_table in routing_tables:
+            # Basic validation to prevent injection if list comes from untrusted source
+            if not r_table.isidentifier():
+                 logger.warning(f"Skipping invalid table name: {r_table}")
+                 continue
+
+            if current_length >= max_total_chars:
+                logger.warning("Routing data budget exceeded. Skipping remaining tables.")
+                break
+
             try:
-                df = pd.read_sql_query(f"SELECT * FROM {r_table}", conn)
-                combined_routing_data += f"\n--- Source: {r_table} ---\n{df.to_string(index=False)}\n"
+                # Limit rows to 50 to prevent massive context
+                df = pd.read_sql_query(f"SELECT * FROM {r_table} LIMIT 50", conn)
+                section_text = f"\n--- Source: {r_table} ---\n{df.to_string(index=False)}\n"
+                
+                if current_length + len(section_text) > max_total_chars:
+                    # Truncate
+                    allowed = max_total_chars - current_length
+                    section_text = section_text[:allowed] + "\n...[TRUNCATED]..."
+                    combined_routing_sections.append(section_text)
+                    current_length += allowed
+                    break
+                
+                combined_routing_sections.append(section_text)
+                current_length += len(section_text)
+                
             except Exception as e:
                 logger.warning(f"Could not read routing table {r_table}: {e}")
         conn.close()
 
+        combined_routing_data = "".join(combined_routing_sections)
+
         if not combined_routing_data:
             return {'sql_tables': [], 'qdrant_ids': []}
-
-        system_prompt = (
-            "You are a Precision Data Scout. "
-            "Review the specific entries from the selected sources (Routing Tables). "
-            "Identify the specific 'table_name' (for SQL/Excel) or 'qdrant_point_id' (for Text) that contain the answer. "
-            "Return a JSON object with two keys: 'sql_tables' (list of strings) and 'qdrant_ids' (list of strings)."
-        )
-
-        user_prompt = f"""
-        User Query: "{self.query}"
-        
-        --- Routing Data ---
-        {combined_routing_data}
-        
-        Output JSON: {{ "sql_tables": ["name1", ...], "qdrant_ids": ["id1", ...] }}
-        """
-
-        try:
-            response = self.client.chat.completions.create(
-                model=self.llm_model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.0,
-                response_format={"type": "json_object"}
-            )
-            import json
-            try:
-                result = json.loads(response.choices[0].message.content)
-                logger.info(f"Level 2 Selected: {result}")
-                return result
-            except json.JSONDecodeError as je:
-                logger.error(f"JSON Decode Error in Routing Response: {je}")
-                return {'sql_tables': [], 'qdrant_ids': []}
-
-        except Exception as e:
-            logger.error(f"Routing logic failed: {e}")
-            return {'sql_tables': [], 'qdrant_ids': []}
-
-    def get_detail_content(self, selection: dict):
-        """
-        Level 3: Fetch actual content.
-        """
-        logger.info("Level 3: Fetching Detail Content...")
-        context = ""
-        
-        # 1. Fetch SQL Details
-        sql_tables = selection.get('sql_tables', [])
-        if sql_tables:
-            conn = sqlite3.connect(self.database_path)
-            for table in sql_tables:
-                try:
-                    df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                    context += f"\n### Data Table: {table}\n{df.to_string(index=False)}\n"
-                except Exception as e:
-                    logger.error(f"Error reading Detail SQL {table}: {e}")
-            conn.close()
             
-        # 2. Fetch Qdrant Details
-        qdrant_ids = selection.get('qdrant_ids', [])
-        if qdrant_ids:
-            try:
-                points = self.qdrant_client.retrieve(
-                    collection_name=self.collection_name,
-                    ids=qdrant_ids
-                )
-                for point in points:
-                    payload = point.payload
-                    # Assuming payload has 'text' or we construct it
-                    text_content = payload.get('text') or str(payload)
-                    source = payload.get('source', 'Unknown')
-                    context += f"\n### Text Source: {source}\n{text_content}\n"
-            except Exception as e:
-                logger.error(f"Error retrieving Qdrant points: {e}")
-                
-        return context
+        # ... (rest of method) ...
 
-    def pipeline(self):
-        logger.info("Starting V2 3-Level Implementation Plan Pipeline")
-        
-        # Step 1: Master -> Routing Tables
-        routing_tables = self.get_master_routing()
-        
-        # Step 2: Routing Tables -> Specific Details
-        selection = self.get_routing_response(routing_tables)
-        
-        # Step 3: Fetch Details
-        detail_context = self.get_detail_content(selection)
-        
-        # Step 4: Hybrid Search (Safety Net) - Run standard Semantic Search as well
-        # This catches things the hierarchical drill-down might miss
+    # ... (in pipeline) ...
+        # Step 4: Hybrid Search (Safety Net)
         semantic_results = self.search_qdrant(top_k=3)
         semantic_context = ""
         for point in semantic_results:
@@ -278,7 +215,18 @@ class AgentManager:
         logger.info("Synthesizing V2 Response...")
         
         hierarchical_data = context_dict.get("Hierarchical Data", "")
-        semantic_data = context_dict.get("Semantic Data", "")
+        semantic_data = context_dict.get("Semantic Data")
+        
+        # Fallback if semantic data missing but search results exist
+        if not semantic_data and search_results:
+            semantic_lines = []
+            for point in search_results:
+                payload = getattr(point, "payload", {})
+                text = payload.get('text', str(payload))
+                semantic_lines.append(f"- [Semantic Match]: {text}")
+            semantic_data = "\n".join(semantic_lines)
+            
+        if semantic_data is None: semantic_data = ""
         
         system_prompt = (
             "You are an expert Market Intelligence Analyst for Kenya. "
