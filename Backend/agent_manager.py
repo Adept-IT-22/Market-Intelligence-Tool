@@ -94,7 +94,7 @@ class AgentManager:
         Level 1: Query Master table to find relevant Routing Tables.
         """
         logger.info("Level 1: Master Table Routing...")
-        master_schema = self.get_table_schema(table_name='Master')
+        # (Removed unused schema fetch)
         
         # We need to fetch the ROWS, not just Schema, to reason about content? 
         # Or better, fetch all rows from Master and let LLM decide. 
@@ -108,7 +108,7 @@ class AgentManager:
             return []
 
         master_context = df_master.to_string(index=False)
-
+        # ... (rest of get_master_routing identical) ...
         system_prompt = (
             "You are a Data Architect. Your goal is to select relevant 'Routing Tables' from the Master Menu. "
             "Analyze the User Query and the Master Table. "
@@ -154,7 +154,7 @@ class AgentManager:
         """
         logger.info(f"Level 2: Scanning Routing Tables ({len(routing_tables)})...")
         if not routing_tables:
-            return {'SQL': [], 'Qdrant': []}
+            return {'sql_tables': [], 'qdrant_ids': []}
 
         conn = sqlite3.connect(self.database_path)
         combined_routing_data = ""
@@ -170,7 +170,7 @@ class AgentManager:
         conn.close()
 
         if not combined_routing_data:
-            return {'SQL': [], 'Qdrant': []}
+            return {'sql_tables': [], 'qdrant_ids': []}
 
         system_prompt = (
             "You are a Precision Data Scout. "
@@ -199,12 +199,17 @@ class AgentManager:
                 response_format={"type": "json_object"}
             )
             import json
-            result = json.loads(response.choices[0].message.content)
-            logger.info(f"Level 2 Selected: {result}")
-            return result
+            try:
+                result = json.loads(response.choices[0].message.content)
+                logger.info(f"Level 2 Selected: {result}")
+                return result
+            except json.JSONDecodeError as je:
+                logger.error(f"JSON Decode Error in Routing Response: {je}")
+                return {'sql_tables': [], 'qdrant_ids': []}
+
         except Exception as e:
             logger.error(f"Routing logic failed: {e}")
-            return {'SQL': [], 'Qdrant': []}
+            return {'sql_tables': [], 'qdrant_ids': []}
 
     def get_detail_content(self, selection: dict):
         """
@@ -268,8 +273,8 @@ class AgentManager:
         # Final Synthesis
         return self.get_final_response(semantic_results, {"Hierarchical Data": detail_context, "Semantic Data": semantic_context})
 
-    def get_final_response(self, _, context_dict):
-        # Overriding the signature slightly to fit the new flow
+    def get_final_response(self, search_results, context_dict):
+        # Renamed '_' to 'search_results' for backward compatibility/clarity
         logger.info("Synthesizing V2 Response...")
         
         hierarchical_data = context_dict.get("Hierarchical Data", "")

@@ -3,8 +3,8 @@ import sqlite3
 import pandas as pd
 import logging
 import uuid
+import re
 from datetime import datetime
-from typing import List, Dict, Union
 import argparse
 
 # Qdrant & Embedding Imports
@@ -14,7 +14,7 @@ from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 
 # File parsers
-import pypdf # Assuming pypdf or PyPDF2 is installed/will be required
+import pypdf 
 
 load_dotenv()
 
@@ -53,6 +53,12 @@ class DataIngester:
                 vectors_config=VectorParams(size=384, distance=Distance.COSINE)
             )
 
+    def _validate_table_name(self, table_name):
+        """Ensures table name is safe for SQL interpolation."""
+        if not re.match(r'^[a-z0-9_]+$', table_name):
+            raise ValueError(f"Invalid table name: {table_name}")
+        return table_name
+
     def process_input(self, input_path: str, source_type: str, title: str, sectors: str, summary: str):
         """
         Main entry point for ingestion.
@@ -80,8 +86,15 @@ class DataIngester:
     def _create_master_entry(self, title, datatype, summary, sectors):
         # Generate a unique name for the routing table
         safe_title = "".join([c if c.isalnum() else "_" for c in title]).lower()
+        # Ensure it starts with a letter and is alphanumeric
+        safe_title = re.sub(r'^[^a-z]+', '', safe_title)
+        if not safe_title: safe_title = "u_data"
+        
         timestamp = int(datetime.now().timestamp())
         routing_table_name = f"routing_{safe_title}_{timestamp}"
+        
+        # Validate immediately
+        self._validate_table_name(routing_table_name)
         
         current_date = datetime.now().strftime("%Y-%m-%d")
 
@@ -100,6 +113,9 @@ class DataIngester:
         return master_id, routing_table_name
 
     def _create_routing_table(self, table_name, datatype):
+        # Validation
+        self._validate_table_name(table_name)
+
         if datatype.lower() in ['excel', 'sql']:
             # SQL Routing Table
             self.cursor.execute(f"""
@@ -141,9 +157,13 @@ class DataIngester:
             safe_sheet = "".join([c if c.isalnum() else "_" for c in sheet_name]).lower()
             detail_table_name = f"detail_{master_id}_{safe_sheet}"
             
+            # Validate detail table name
+            self._validate_table_name(detail_table_name)
+            
             df.to_sql(detail_table_name, self.conn, if_exists='replace', index=False)
             
             # Level 2: Insert into Routing Table
+            # Note: routing_table_name is already validated
             self.cursor.execute(f"""
                 INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, table_name)
                 VALUES (?, ?, ?, ?, ?)
@@ -161,7 +181,6 @@ class DataIngester:
                 continue
                 
             # Chunking logic (Naive 1000 chars for now)
-            # A real splitter would be better
             chunks = [text[j:j+1000] for j in range(0, len(text), 1000)]
             
             for k, chunk in enumerate(chunks):
@@ -185,7 +204,6 @@ class DataIngester:
                 )
                 
                 # 3. Insert into Routing Table (Level 2)
-                # Helper title
                 chunk_title = f"Page {i+1} Part {k+1}"
                 
                 self.cursor.execute(f"""
@@ -196,8 +214,6 @@ class DataIngester:
         self.conn.commit()
 
     def _process_url(self, url, master_id, routing_table_name, sectors):
-        # Placeholder for URL scraping
-        # Requires requests/BeautifulSoup
         import requests
         from bs4 import BeautifulSoup
         
