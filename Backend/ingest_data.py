@@ -1,23 +1,21 @@
 import os
-import sqlite3
 import pandas as pd
 import logging
 import uuid
 import re
-from datetime import datetime
 import argparse
 import requests
 from bs4 import BeautifulSoup
 
 # Qdrant & Embedding Imports
-from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct, VectorParams, Distance
-from sentence_transformers import SentenceTransformer
+from qdrant_client.models import PointStruct
 from dotenv import load_dotenv
 
 # File parsers
 import pypdf 
 
+import requests
+from bs4 import BeautifulSoup
 load_dotenv()
 
 # Configure logging
