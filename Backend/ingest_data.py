@@ -89,10 +89,26 @@ class DataIngester:
              logger.error(f"Invalid URL format: {input_path}")
              return
              
-        master_id = str(uuid.uuid4())
+    def process_input(self, input_path: str, source_type: str, title: str, sectors: str, summary: str):
+        logger.info(f"Processing {source_type}: {input_path}")
+        
+        # Normalize input path
+        if not input_path.startswith(('http://', 'https://')):
+            input_path = os.path.abspath(input_path)
+
+        # Validate Input BEFORE creating Master entry
+        supported_types = ['excel', 'pdf', 'url', 'docx', 'pptx']
+        if source_type.lower() not in supported_types:
+             logger.error(f"Unsupported source type: {source_type}")
+             return
+
+        if source_type.lower() == 'url' and not input_path.startswith(('http://', 'https://')):
+             logger.error(f"Invalid URL format: {input_path}")
+             return
+             
         try:
-             # 1. Level 1: Insert into Master
-            routing_table_name = self._create_master_entry(master_id, title, input_path, source_type, summary, sectors)
+             # 1. Level 1: Insert into Master and get assigned ID
+            master_id, routing_table_name = self._create_master_entry(title, input_path, source_type, summary, sectors)
             
             # 2. Level 2 & 3: Process content
             st_lower = source_type.lower()
@@ -111,7 +127,7 @@ class DataIngester:
             
         except Exception as e:
             logger.error(f"Ingestion failed: {e}")
-            if 'routing_table_name' in locals():
+            if 'routing_table_name' in locals() and 'master_id' in locals():
                 logger.warning(f"Rolling back: Dropping routing table {routing_table_name}")
                 try:
                     self.cursor.execute(f"DROP TABLE IF EXISTS {routing_table_name}")
@@ -121,23 +137,28 @@ class DataIngester:
                     logger.error(f"Rollback failed: {rollback_err}")
             raise e
 
-    def _create_master_entry(self, master_id, title, source, source_type, summary, sectors):
+    def _create_master_entry(self, title, source, source_type, summary, sectors):
+        # Create unique routing table name prefix
         safe_title = "".join([c if c.isalnum() else "_" for c in title]).lower()
-        routing_table_name = f"route_{safe_title[:20]}_{master_id[:8]}"
-        self._validate_table_name(routing_table_name)
-        
         month_str = datetime.now().strftime("%B %Y")
         
-        logger.info(f"Creating Master Entry: {title} -> {routing_table_name}")
+        logger.info(f"Creating Master Entry: {title}")
         self.cursor.execute("""
-            INSERT INTO Master (id, Title, Source, Summary, Datatype, Sectors, table_name, "Month Created")
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (master_id, title, source, summary, source_type, sectors, routing_table_name, month_str))
+            INSERT INTO Master (Title, Source, Summary, Datatype, Sectors, table_name, "Month Created")
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (title, source, summary, source_type, sectors, "PENDING", month_str))
+        
+        master_id = self.cursor.lastrowid
+        routing_table_name = f"route_{safe_title[:20]}_{master_id}"
+        self._validate_table_name(routing_table_name)
+        
+        # Update with real routing table name
+        self.cursor.execute("UPDATE Master SET table_name = ? WHERE id = ?", (routing_table_name, master_id))
         
         self._create_routing_table(routing_table_name)
         self.conn.commit()
         
-        return routing_table_name
+        return master_id, routing_table_name
 
     def _create_routing_table(self, table_name):
         self._validate_table_name(table_name)
@@ -166,7 +187,11 @@ class DataIngester:
                 safe_sheet = "".join([c if c.isalnum() else "_" for c in sheet_name]).lower()
                 if not safe_sheet: safe_sheet = "sheet"
                 
-                detail_table_name = f"detail_{master_id[:8]}_{safe_sheet}"
+                if df.empty or len(df.columns) == 0:
+                    logger.warning(f"Skipping empty sheet {sheet_name} in {file_path}")
+                    continue
+                
+                detail_table_name = f"detail_{master_id}_{safe_sheet}"
                 self._validate_table_name(detail_table_name)
                 df.to_sql(detail_table_name, self.conn, if_exists='replace', index=False)
                 
@@ -176,7 +201,7 @@ class DataIngester:
                 """, (master_id, f"Sheet: {sheet_name}", "SQL", sectors, detail_table_name))
             self.conn.commit()
         except Exception as e:
-            logger.error(f"Excel processing failed: {e}")
+            logger.error(f"Excel processing failed for {file_path}: {e}")
             raise e
 
     def _process_pdf(self, file_path, master_id, routing_table_name, sectors):
@@ -189,7 +214,7 @@ class DataIngester:
                 self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, f"Page {i+1}")
             self.conn.commit()
         except Exception as e:
-            logger.error(f"PDF processing failed: {e}")
+            logger.error(f"PDF processing failed for {file_path}: {e}")
             raise e
 
     def _process_docx(self, file_path, master_id, routing_table_name, sectors):
@@ -199,7 +224,7 @@ class DataIngester:
             self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, "Document Content")
             self.conn.commit()
         except Exception as e:
-            logger.error(f"Docx processing failed: {e}")
+            logger.error(f"Docx processing failed for {file_path}: {e}")
             raise e
 
     def _process_pptx(self, file_path, master_id, routing_table_name, sectors):
@@ -215,7 +240,7 @@ class DataIngester:
                 self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, f"Slide {i+1}")
             self.conn.commit()
         except Exception as e:
-            logger.error(f"Pptx processing failed: {e}")
+            logger.error(f"Pptx processing failed for {file_path}: {e}")
             raise e
 
     def _process_url(self, url, master_id, routing_table_name, sectors):
@@ -229,7 +254,7 @@ class DataIngester:
             self._upsert_text_chunks(text, url, master_id, routing_table_name, sectors, "Web Content")
             self.conn.commit()
         except Exception as e:
-            logger.error(f"URL processing failed: {e}")
+            logger.error(f"URL processing failed for {url}: {e}")
             raise e
 
     def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, title_prefix):
@@ -278,7 +303,10 @@ if __name__ == "__main__":
                 if f_type:
                     full_path = os.path.join(root, file)
                     f_title = args.title if args.title else file
-                    ingester.process_input(full_path, f_type, f_title, args.sectors, args.summary)
+                    try:
+                        ingester.process_input(full_path, f_type, f_title, args.sectors, args.summary)
+                    except Exception as e:
+                        logger.error(f"Failed to process {full_path}: {e}")
     else:
         # Use provided type or auto-detect
         type_map = {'.xlsx': 'excel', '.xls': 'excel', '.pdf': 'pdf', '.docx': 'docx', '.pptx': 'pptx'}
@@ -291,5 +319,9 @@ if __name__ == "__main__":
             logger.error("Could not determine file type. Please specify --type.")
         else:
             f_title = args.title if args.title else os.path.basename(args.input)
-            ingester.process_input(args.input, f_type, f_title, args.sectors, args.summary)
+            try:
+                ingester.process_input(args.input, f_type, f_title, args.sectors, args.summary)
+            except Exception as e:
+                logger.error(f"Failed to process {args.input}: {e}")
+
 
