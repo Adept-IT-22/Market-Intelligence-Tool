@@ -270,18 +270,18 @@ class AgentManager:
 
                 try:
                     # Fetch source link from Master table using master_id prefix from detail table name
-                    # detail table name format: detail_{master_id[:8]}_{safe_sheet}
-                    master_prefix = table.split('_')[1] if '_' in table else None
+                    master_id = table.split('_')[1] if '_' in table else None
                     source_link = "Unknown Source"
-                    if master_prefix:
+                    if master_id:
                         cur = conn.cursor()
-                        cur.execute("SELECT Source FROM Master WHERE id = ?", (master_prefix,))
+                        cur.execute("SELECT Source FROM Master WHERE id = ?", (master_id,))
                         row = cur.fetchone()
                         if row:
                             source_link = row[0]
 
+                    source_name = os.path.basename(source_link)
                     df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                    context += f"\n### Data Table: {table}\n[Source: {source_link}]\n{df.to_string(index=False)}\n"
+                    context += f"\n---\nSource: {source_name}\nLink: {source_link}\nTable Data:\n{df.to_string(index=False)}\n"
                 except Exception as e:
                     logger.error(f"Error reading Detail SQL {table}: {e}")
             conn.close()
@@ -300,10 +300,10 @@ class AgentManager:
                     )
                     for point in points:
                         payload = point.payload
-                        # Assuming payload has 'text' or we construct it
                         text_content = payload.get('text') or str(payload)
-                        source = payload.get('source', 'Unknown')
-                        context += f"\n### Text Source: {source}\n{text_content}\n"
+                        source_link = payload.get('source', 'Unknown')
+                        source_name = os.path.basename(source_link)
+                        context += f"\n---\nSource: {source_name}\nLink: {source_link}\nContent:\n{text_content}\n"
             except Exception as e:
                 logger.error(f"Error retrieving Qdrant points: {e}")
                 
@@ -328,8 +328,9 @@ class AgentManager:
         for point in semantic_results:
              payload = point.payload
              text = payload.get('text', str(payload))
-             source = payload.get('source', 'Unknown')
-             semantic_context += f"- [Semantic Match from {source}]: {text}\n"
+             source_link = payload.get('source', 'Unknown')
+             source_name = os.path.basename(source_link)
+             semantic_context += f"- [Source: {source_name} | Link: {source_link}]: {text}\n"
 
         # Final Synthesis
         return self.get_final_response(semantic_results, {"Hierarchical Data": detail_context, "Semantic Data": semantic_context})
@@ -347,20 +348,26 @@ class AgentManager:
             for point in search_results:
                 payload = getattr(point, "payload", {})
                 text = payload.get('text', str(payload))
-                source = payload.get('source', 'Unknown')
-                semantic_lines.append(f"- [Semantic Match from {source}]: {text}")
+                source_link = payload.get('source', 'Unknown')
+                source_name = os.path.basename(source_link)
+                semantic_lines.append(f"- [Source: {source_name} | Link: {source_link}]: {text}")
             semantic_data = "\n".join(semantic_lines)
             
         if semantic_data is None: semantic_data = ""
         
         system_prompt = (
-            "You are an expert Market Intelligence Analyst for Kenya and Adept Technologies Ltd. "
+            "You are an expert Market Intelligence Analyst for Adept Technologies Ltd. "
             "Synthesize the provided data to answer the User Query accurately. "
-            "The data comes from internal documents, cloud automation reports, and general market intelligence. "
-            "IMPORTANT: You MUST cite your sources. For every piece of information or paragraph, include a referenced link to the source file at the end. "
-            "If the source is a file path, format it as a markdown link like: [Source Name](file:///path/to/file). "
-            "If the source is a URL, format it as [Source Name](URL). "
-            "List all references used at the very end of your response in a 'References' section."
+            "IMPORTANT CITATION RULES:\n"
+            "1. You MUST cite your sources using Markdown hyperlinks: [Filename](URI).\n"
+            "2. The visible text between brackets MUST ONLY be the filename (e.g., 'Report.pdf').\n"
+            "3. The URI inside the parentheses MUST be the full 'URI' or 'Link' provided in the context.\n"
+            "4. DO NOT include the full path or 'Semantic Match' or 'Text Source' in the visible text.\n"
+            "5. List all unique references at the very end in a 'References' section using the same [Filename](URI) format.\n"
+            "\nExample Response:\n"
+            "The project started in 2023 [ProjectPlan.docx](file:///...). For more details, see the [Reference Section].\n"
+            "\nReferences:\n"
+            "1. [ProjectPlan.docx](file:///...)"
         )
         
         user_prompt = f"""
