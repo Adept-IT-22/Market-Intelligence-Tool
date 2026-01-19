@@ -3,7 +3,6 @@ import pandas as pd
 import logging
 import uuid
 import re
-from datetime import datetime
 import argparse
 
 # Qdrant & Embedding Imports
