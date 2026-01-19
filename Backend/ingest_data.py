@@ -7,7 +7,6 @@ import argparse
 
 # Qdrant & Embedding Imports
 from qdrant_client.models import PointStruct, VectorParams, Distance
-from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 
 # File parsers
