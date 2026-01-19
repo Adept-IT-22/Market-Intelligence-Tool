@@ -199,6 +199,19 @@ class AgentManager:
             "Identify the specific 'table_name' (for SQL/Excel) or 'qdrant_point_id' (for Text) that contain the answer. "
             "Return a JSON object with two keys: 'sql_tables' (list of strings) and 'qdrant_ids' (list of strings)."
         )
+        
+        # Format Qdrant Context
+        qdrant_context = ""
+        for point in qdrant_results:
+            payload = point.payload or {}
+            summary = payload.get("summary") or payload.get("content", "")
+            qdrant_context += f"- {summary[:500]}\n"
+
+
+        # Format SQL Context (Limit length)
+        sql_context = ""
+        for table, data in detail_tables.items():
+            sql_context += f"\nTable: {table}\nData (Sample):\n{str(data)[:2000]}\n"
 
         user_prompt = f"""
         User Query: "{self.query}"
