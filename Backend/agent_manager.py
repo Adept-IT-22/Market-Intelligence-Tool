@@ -93,30 +93,49 @@ class AgentManager:
     def get_master_routing(self):
         """
         Level 1: Query Master table to find relevant Routing Tables.
+        Optimized: Pre-filters using semantic search to avoid context overflow.
         """
-        logger.info("Level 1: Master Table Routing...")
+        logger.info("Level 1: Master Table Routing (Optimized)...")
         
+        # 1. Semantic Pre-search to find candidate tables
+        # We search the main collection to see which documents are semantically relevant
+        pre_search_results = self.search_qdrant(top_k=10)
+        candidate_routing_tables = set()
+        for point in pre_search_results:
+            payload = point.payload or {}
+            rt = payload.get("routing_table")
+            if rt:
+                candidate_routing_tables.add(rt)
+        
+        if not candidate_routing_tables:
+            logger.warning("No candidate routing tables found via semantic search.")
+            # Fallback: maybe just try the first few or return empty
+            return []
+
+        # 2. Fetch only the relevant Master entries
         conn = sqlite3.connect(self.database_path)
-        df_master = pd.read_sql_query("SELECT id, Title, Source, Summary, Datatype, Sectors, table_name FROM Master", conn)
+        placeholders = ', '.join(['?'] * len(candidate_routing_tables))
+        query = f"SELECT id, Title, Source, Summary, Datatype, Sectors, table_name FROM Master WHERE table_name IN ({placeholders})"
+        df_master = pd.read_sql_query(query, conn, params=list(candidate_routing_tables))
         conn.close()
         
         if df_master.empty:
-            logger.warning("Master table is empty.")
-            return []
+            logger.warning("No matching Master entries for candidates.")
+            return list(candidate_routing_tables) # Return candidates anyway if DB lookup fails?
 
         master_context = df_master.to_string(index=False)
 
         system_prompt = (
             "You are a Data Architect. Your goal is to select relevant 'Routing Tables' from the Master Menu. "
-            "Analyze the User Query and the Master Table. "
-            "Return a comma-separated list of 'table_name' that are most relevant. "
+            "Analyze the User Query and the filtered Master Table. "
+            "Return a comma-separated list of 'table_name' that are most relevant to answering the query. "
             "If nothing is relevant, return nothing."
         )
 
         user_prompt = f"""
         User Query: "{self.query}"
         
-        --- Master Table (Menu) ---
+        --- Filtered Master Table (Candidates) ---
         {master_context}
         
         Output Format: table_name1, table_name2
@@ -143,7 +162,7 @@ class AgentManager:
             return final_tables
         except Exception as e:
             logger.error(f"Master Routing failed: {e}")
-            return []
+            return list(candidate_routing_tables)[:3] # Broad fallback to top semantic candidates
 
     def get_routing_response(self, routing_tables: list):
         """
@@ -241,8 +260,6 @@ class AgentManager:
         
         # 1. Fetch SQL Details
         sql_tables = selection.get('sql_tables', [])
-        # 1. Fetch SQL Details
-        sql_tables = selection.get('sql_tables', [])
         if sql_tables:
             conn = sqlite3.connect(self.database_path)
             for table in sql_tables:
@@ -258,7 +275,7 @@ class AgentManager:
                     source_link = "Unknown Source"
                     if master_prefix:
                         cur = conn.cursor()
-                        cur.execute("SELECT Source FROM Master WHERE id LIKE ?", (f"{master_prefix}%",))
+                        cur.execute("SELECT Source FROM Master WHERE id = ?", (master_prefix,))
                         row = cur.fetchone()
                         if row:
                             source_link = row[0]
