@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 # File parsers
 import pypdf 
 
+import requests
+from bs4 import BeautifulSoup
 load_dotenv()
 
 # Configure logging
