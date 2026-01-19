@@ -200,19 +200,6 @@ class AgentManager:
             "Return a JSON object with two keys: 'sql_tables' (list of strings) and 'qdrant_ids' (list of strings)."
         )
         
-        # Format Qdrant Context
-        qdrant_context = ""
-        for point in qdrant_results:
-            payload = point.payload or {}
-            summary = payload.get("summary") or payload.get("content", "")
-            qdrant_context += f"- {summary[:500]}\n"
-
-
-        # Format SQL Context (Limit length)
-        sql_context = ""
-        for table, data in detail_tables.items():
-            sql_context += f"\nTable: {table}\nData (Sample):\n{str(data)[:2000]}\n"
-
         user_prompt = f"""
         User Query: "{self.query}"
         
@@ -254,6 +241,8 @@ class AgentManager:
         
         # 1. Fetch SQL Details
         sql_tables = selection.get('sql_tables', [])
+        # 1. Fetch SQL Details
+        sql_tables = selection.get('sql_tables', [])
         if sql_tables:
             conn = sqlite3.connect(self.database_path)
             for table in sql_tables:
@@ -263,8 +252,19 @@ class AgentManager:
                      continue
 
                 try:
+                    # Fetch source link from Master table using master_id prefix from detail table name
+                    # detail table name format: detail_{master_id[:8]}_{safe_sheet}
+                    master_prefix = table.split('_')[1] if '_' in table else None
+                    source_link = "Unknown Source"
+                    if master_prefix:
+                        cur = conn.cursor()
+                        cur.execute("SELECT Source FROM Master WHERE id LIKE ?", (f"{master_prefix}%",))
+                        row = cur.fetchone()
+                        if row:
+                            source_link = row[0]
+
                     df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                    context += f"\n### Data Table: {table}\n{df.to_string(index=False)}\n"
+                    context += f"\n### Data Table: {table}\n[Source: {source_link}]\n{df.to_string(index=False)}\n"
                 except Exception as e:
                     logger.error(f"Error reading Detail SQL {table}: {e}")
             conn.close()
@@ -311,7 +311,8 @@ class AgentManager:
         for point in semantic_results:
              payload = point.payload
              text = payload.get('text', str(payload))
-             semantic_context += f"- [Semantic Match]: {text}\n"
+             source = payload.get('source', 'Unknown')
+             semantic_context += f"- [Semantic Match from {source}]: {text}\n"
 
         # Final Synthesis
         return self.get_final_response(semantic_results, {"Hierarchical Data": detail_context, "Semantic Data": semantic_context})
@@ -329,17 +330,20 @@ class AgentManager:
             for point in search_results:
                 payload = getattr(point, "payload", {})
                 text = payload.get('text', str(payload))
-                semantic_lines.append(f"- [Semantic Match]: {text}")
+                source = payload.get('source', 'Unknown')
+                semantic_lines.append(f"- [Semantic Match from {source}]: {text}")
             semantic_data = "\n".join(semantic_lines)
             
         if semantic_data is None: semantic_data = ""
         
         system_prompt = (
-            "You are an expert Market Intelligence Analyst for Kenya. "
-            "Synthesize the provided data to answer the User Query. "
-            "The data comes from a Deep Drill-Down (Hierarchical) and a Broad Sweep (Semantic). "
-            "Prioritize the specific tabular data found in the Drill-Down. "
-            "Cite your sources precisely."
+            "You are an expert Market Intelligence Analyst for Kenya and Adept Technologies Ltd. "
+            "Synthesize the provided data to answer the User Query accurately. "
+            "The data comes from internal documents, cloud automation reports, and general market intelligence. "
+            "IMPORTANT: You MUST cite your sources. For every piece of information or paragraph, include a referenced link to the source file at the end. "
+            "If the source is a file path, format it as a markdown link like: [Source Name](file:///path/to/file). "
+            "If the source is a URL, format it as [Source Name](URL). "
+            "List all references used at the very end of your response in a 'References' section."
         )
         
         user_prompt = f"""
@@ -351,7 +355,7 @@ class AgentManager:
         === Semantic Search Context (Broad Context) ===
         {semantic_data}
         
-        Provide a detailed, Markdown-formatted answer.
+        Provide a detailed, Markdown-formatted answer with inline citations and a references list at the end.
         """
         
         try:
@@ -367,3 +371,4 @@ class AgentManager:
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
             return "I encountered an error generating the final response."
+
