@@ -6,7 +6,7 @@ import re
 import argparse
 
 # Qdrant & Embedding Imports
-from qdrant_client.models import PointStruct, VectorParams, Distance
+from qdrant_client.models import PointStruct
 from dotenv import load_dotenv
 
 # File parsers
