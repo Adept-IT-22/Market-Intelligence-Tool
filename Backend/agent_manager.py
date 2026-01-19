@@ -8,6 +8,7 @@ from qdrant_client.models import VectorParams, Distance
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 import logging
+import json
 
 load_dotenv()
 
@@ -94,11 +95,7 @@ class AgentManager:
         Level 1: Query Master table to find relevant Routing Tables.
         """
         logger.info("Level 1: Master Table Routing...")
-        # (Removed unused schema fetch)
         
-        # We need to fetch the ROWS, not just Schema, to reason about content? 
-        # Or better, fetch all rows from Master and let LLM decide. 
-        # Master is small (Menu), so we can fetch all.
         conn = sqlite3.connect(self.database_path)
         df_master = pd.read_sql_query("SELECT id, Title, Source, Summary, Datatype, Sectors, table_name FROM Master", conn)
         conn.close()
@@ -108,7 +105,7 @@ class AgentManager:
             return []
 
         master_context = df_master.to_string(index=False)
-        # ... (rest of get_master_routing identical) ...
+
         system_prompt = (
             "You are a Data Architect. Your goal is to select relevant 'Routing Tables' from the Master Menu. "
             "Analyze the User Query and the Master Table. "
@@ -195,11 +192,107 @@ class AgentManager:
 
         if not combined_routing_data:
             return {'sql_tables': [], 'qdrant_ids': []}
-            
-        # ... (rest of method) ...
 
-    # ... (in pipeline) ...
-        # Step 4: Hybrid Search (Safety Net)
+        system_prompt = (
+            "You are a Precision Data Scout. "
+            "Review the specific entries from the selected sources (Routing Tables). "
+            "Identify the specific 'table_name' (for SQL/Excel) or 'qdrant_point_id' (for Text) that contain the answer. "
+            "Return a JSON object with two keys: 'sql_tables' (list of strings) and 'qdrant_ids' (list of strings)."
+        )
+
+        user_prompt = f"""
+        User Query: "{self.query}"
+        
+        --- Routing Data ---
+        {combined_routing_data}
+        
+        Output JSON: {{ "sql_tables": ["name1", ...], "qdrant_ids": ["id1", ...] }}
+        """
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.llm_model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"}
+            )
+            
+            try:
+                result = json.loads(response.choices[0].message.content)
+                logger.info(f"Level 2 Selected: {result}")
+                return result
+            except json.JSONDecodeError as je:
+                logger.error(f"JSON Decode Error in Routing Response: {je}")
+                return {'sql_tables': [], 'qdrant_ids': []}
+
+        except Exception as e:
+            logger.error(f"Routing logic failed: {e}")
+            return {'sql_tables': [], 'qdrant_ids': []}
+
+    def get_detail_content(self, selection: dict):
+        """
+        Level 3: Fetch actual content.
+        """
+        logger.info("Level 3: Fetching Detail Content...")
+        context = ""
+        
+        # 1. Fetch SQL Details
+        sql_tables = selection.get('sql_tables', [])
+        if sql_tables:
+            conn = sqlite3.connect(self.database_path)
+            for table in sql_tables:
+                # Validate table name (basic injection check)
+                if not table.isidentifier() and not table.replace('_', '').isalnum(): 
+                     logger.warning(f"Skipping suspicious table name in detail fetch: {table}")
+                     continue
+
+                try:
+                    df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                    context += f"\n### Data Table: {table}\n{df.to_string(index=False)}\n"
+                except Exception as e:
+                    logger.error(f"Error reading Detail SQL {table}: {e}")
+            conn.close()
+            
+        # 2. Fetch Qdrant Details
+        qdrant_ids = selection.get('qdrant_ids', [])
+        if qdrant_ids:
+            try:
+                # Validate IDs briefly (UUID check or length)
+                safe_ids = [qid for qid in qdrant_ids if len(qid) > 10] # basic check
+                
+                if safe_ids:
+                    points = self.qdrant_client.retrieve(
+                        collection_name=self.collection_name,
+                        ids=safe_ids
+                    )
+                    for point in points:
+                        payload = point.payload
+                        # Assuming payload has 'text' or we construct it
+                        text_content = payload.get('text') or str(payload)
+                        source = payload.get('source', 'Unknown')
+                        context += f"\n### Text Source: {source}\n{text_content}\n"
+            except Exception as e:
+                logger.error(f"Error retrieving Qdrant points: {e}")
+                
+        return context
+
+    def pipeline(self):
+        logger.info("Starting V2 3-Level Implementation Plan Pipeline")
+        
+        # Step 1: Master -> Routing Tables
+        routing_tables = self.get_master_routing()
+        
+        # Step 2: Routing Tables -> Specific Details
+        selection = self.get_routing_response(routing_tables)
+        
+        # Step 3: Fetch Details
+        detail_context = self.get_detail_content(selection)
+        
+        # Step 4: Hybrid Search (Safety Net) - Run standard Semantic Search as well
+        # This catches things the hierarchical drill-down might miss
         semantic_results = self.search_qdrant(top_k=3)
         semantic_context = ""
         for point in semantic_results:

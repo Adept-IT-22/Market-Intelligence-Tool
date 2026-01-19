@@ -6,6 +6,8 @@ import uuid
 import re
 from datetime import datetime
 import argparse
+import requests
+from bs4 import BeautifulSoup
 
 # Qdrant & Embedding Imports
 from qdrant_client import QdrantClient
@@ -31,21 +33,44 @@ EMBEDDING_MODEL = "BAAI/bge-small-en"
 
 class DataIngester:
     def __init__(self):
-        # ... (init code) ...
+        self.conn = sqlite3.connect(DB_PATH)
+        self.cursor = self.conn.cursor()
+        
+        # Initialize Embedder
+        logger.info("Loading embedding model...")
+        self.embedder = SentenceTransformer(EMBEDDING_MODEL)
+        
+        # Initialize Qdrant
+        logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
+        self.qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
         self._ensure_collection()
+
+    def _ensure_collection(self):
+        try:
+            collections = self.qdrant.get_collections().collections
+            exists = any(c.name == COLLECTION_NAME for c in collections)
+            if not exists:
+                logger.info(f"Creating collection {COLLECTION_NAME}")
+                self.qdrant.create_collection(
+                    collection_name=COLLECTION_NAME,
+                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+                )
+        except Exception as e:
+            logger.error(f"Failed to ensure collection: {e}")
+            raise
 
     def __del__(self):
         if hasattr(self, 'conn') and self.conn:
             self.conn.close()
 
     def _validate_table_name(self, table_name):
-        # ... (existing validation) ...
         if not re.match(r'^[a-z0-9_]+$', table_name):
             raise ValueError(f"Invalid table name: {table_name}")
         return table_name
 
     def _chunk_text(self, text, size=1000):
         """Helper to chunk text into specific sizes."""
+        if not text: return []
         return [text[i:i+size] for i in range(0, len(text), size)]
 
     def process_input(self, input_path: str, source_type: str, title: str, sectors: str, summary: str):
@@ -60,14 +85,15 @@ class DataIngester:
              logger.error(f"Invalid URL format: {input_path}")
              return
              
+        master_id = str(uuid.uuid4())
         try:
              # 1. Level 1: Insert into Master
-            master_id, routing_table_name = self._create_master_entry(title, source_type, summary, sectors)
+            routing_table_name = self._create_master_entry(master_id, title, input_path, source_type, summary, sectors)
             
             # 2. Level 2 & 3: Process content
-            if source_type.lower() == 'excel' or input_path.endswith(('.xlsx', '.xls')):
+            if source_type.lower() == 'excel' or (isinstance(input_path, str) and input_path.endswith(('.xlsx', '.xls'))):
                 self._process_excel(input_path, master_id, routing_table_name, sectors)
-            elif source_type.lower() == 'pdf' or input_path.endswith('.pdf'):
+            elif source_type.lower() == 'pdf' or (isinstance(input_path, str) and input_path.endswith('.pdf')):
                 self._process_pdf(input_path, master_id, routing_table_name, sectors)
             elif source_type.lower() == 'url':
                 self._process_url(input_path, master_id, routing_table_name, sectors)
@@ -76,14 +102,57 @@ class DataIngester:
             
         except Exception as e:
             logger.error(f"Ingestion failed: {e}")
-            # Optional: Rollback Master entry if created? 
-            # For now, just logging error. To be robust, we could delete the master entry.
-            if 'master_id' in locals():
-                 logger.warning(f"Orphaned Master Entry Created: ID {master_id}")
+            # Optional: Rollback Master entry (Delete row from Master and drop routing table)
+            if 'routing_table_name' in locals():
+                logger.warning(f"Rolling back: Dropping routing table {routing_table_name}")
+                try:
+                    self.cursor.execute(f"DROP TABLE IF EXISTS {routing_table_name}")
+                    self.cursor.execute("DELETE FROM Master WHERE id = ?", (master_id,))
+                    self.conn.commit()
+                except Exception as rollback_err:
+                    logger.error(f"Rollback failed: {rollback_err}")
+            raise e
 
-    # ... _create_master_entry ...
-    
-    # ... _create_routing_table ...
+    def _create_master_entry(self, master_id, title, source, source_type, summary, sectors):
+        """
+        Creates an entry in the Master table and initializes the Routing Table.
+        """
+        # Create unique routing table name
+        safe_title = "".join([c if c.isalnum() else "_" for c in title]).lower()
+        routing_table_name = f"route_{safe_title[:20]}_{master_id[:8]}"
+        self._validate_table_name(routing_table_name)
+        
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        
+        logger.info(f"Creating Master Entry: {title} -> {routing_table_name}")
+        self.cursor.execute("""
+            INSERT INTO Master (id, Title, Source, Summary, Datatype, Sectors, table_name, Date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (master_id, title, source, summary, source_type, sectors, routing_table_name, date_str))
+        
+        self._create_routing_table(routing_table_name)
+        self.conn.commit()
+        
+        return routing_table_name
+
+    def _create_routing_table(self, table_name):
+        """
+        Creates the Level 2 Routing Table.
+        """
+        self._validate_table_name(table_name)
+        logger.info(f"Creating Routing Table: {table_name}")
+        self.cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                master_id TEXT,
+                Title TEXT,
+                Datatype TEXT,
+                Sectors TEXT,
+                table_name TEXT,       -- For SQL Details
+                qdrant_source TEXT,    -- For Text Details
+                qdrant_point_id TEXT   -- For Text Details
+            )
+        """)
 
     def _process_excel(self, file_path, master_id, routing_table_name, sectors):
         try:
@@ -98,11 +167,13 @@ class DataIngester:
                 safe_sheet = "".join([c if c.isalnum() else "_" for c in sheet_name]).lower()
                 if not safe_sheet: safe_sheet = "sheet"
                 
-                detail_table_name = f"detail_{master_id}_{safe_sheet}"
+                detail_table_name = f"detail_{master_id[:8]}_{safe_sheet}"
                 self._validate_table_name(detail_table_name)
                 
+                # Write Detail Table (Level 3)
                 df.to_sql(detail_table_name, self.conn, if_exists='replace', index=False)
                 
+                # Update Routing Table (Level 2)
                 self.cursor.execute(f"""
                     INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, table_name)
                     VALUES (?, ?, ?, ?, ?)
@@ -118,7 +189,7 @@ class DataIngester:
             reader = pypdf.PdfReader(file_path)
             for i, page in enumerate(reader.pages):
                 text = page.extract_text()
-                if not text.strip(): continue
+                if not text or not text.strip(): continue
                 
                 chunks = self._chunk_text(text, 1000)
                 
@@ -135,11 +206,13 @@ class DataIngester:
                         "sectors": sectors
                     }
                     
+                    # Store in Qdrant (Level 3)
                     self.qdrant.upsert(
                         collection_name=COLLECTION_NAME,
                         points=[PointStruct(id=point_id, vector=embedding, payload=payload)]
                     )
                     
+                    # Update Routing Table (Level 2)
                     chunk_title = f"Page {i+1} Part {k+1}"
                     self.cursor.execute(f"""
                         INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, qdrant_source, qdrant_point_id)
@@ -153,11 +226,15 @@ class DataIngester:
 
     def _process_url(self, url, master_id, routing_table_name, sectors):
         try:
-            resp = requests.get(url, timeout=10) # Added timeout
+            resp = requests.get(url, timeout=10)
             resp.raise_for_status()
             
             soup = BeautifulSoup(resp.content, 'html.parser')
-            text = soup.get_text(separator='\n')
+            # Remove scripts and styles
+            for script in soup(["script", "style"]):
+                script.decompose()
+                
+            text = soup.get_text(separator=' ', strip=True)
             
             chunks = self._chunk_text(text, 1000)
             
@@ -173,11 +250,13 @@ class DataIngester:
                     "sectors": sectors
                 }
                 
+                # Store in Qdrant (Level 3)
                 self.qdrant.upsert(
                     collection_name=COLLECTION_NAME,
                     points=[PointStruct(id=point_id, vector=embedding, payload=payload)]
                 )
                 
+                # Update Routing Table (Level 2)
                 self.cursor.execute(f"""
                     INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, qdrant_source, qdrant_point_id)
                     VALUES (?, ?, ?, ?, ?, ?)
@@ -188,7 +267,6 @@ class DataIngester:
         except Exception as e:
             logger.error(f"URL processing failed: {e}")
             raise e
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest data into Market Intelligence V2 Ecosystem")
     parser.add_argument("--input", required=True, help="Path to file or URL")
