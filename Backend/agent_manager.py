@@ -82,6 +82,28 @@ class AgentManager:
             logger.error(f"Qdrant search failed: {e}")
             return []
 
+    def _get_display_name(self, uri: str) -> str:
+        """Helper to extract a clean filename or domain/last segment from a URI or Path."""
+        if not uri or uri == "Unknown":
+            return "Unknown"
+        
+        # Handle URLs
+        if uri.startswith(('http://', 'https://')):
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(uri)
+                # If there's a path beyond '/', get the last segment
+                path_segments = [s for s in parsed.path.split('/') if s]
+                if path_segments:
+                    return path_segments[-1]
+                # Fallback to domain
+                return parsed.netloc
+            except:
+                return uri
+        
+        # Handle File Paths
+        return os.path.basename(uri)
+
     def get_table_schema(self, table_name):
         conn = sqlite3.connect(self.database_path)
         cursor = conn.cursor()
@@ -109,7 +131,6 @@ class AgentManager:
         
         if not candidate_routing_tables:
             logger.warning("No candidate routing tables found via semantic search.")
-            # Fallback: maybe just try the first few or return empty
             return []
 
         # 2. Fetch only the relevant Master entries
@@ -162,7 +183,7 @@ class AgentManager:
             return final_tables
         except Exception as e:
             logger.error(f"Master Routing failed: {e}")
-            return list(candidate_routing_tables)[:3] # Broad fallback to top semantic candidates
+            return []
 
     def get_routing_response(self, routing_tables: list):
         """
@@ -269,8 +290,16 @@ class AgentManager:
                      continue
 
                 try:
-                    # Fetch source link from Master table using master_id prefix from detail table name
-                    master_id = table.split('_')[1] if '_' in table else None
+                    # Robust extraction of master_id from table name (expected: detail_<master_id>_<suffix>)
+                    master_id = None
+                    if table.startswith("detail_"):
+                        parts = table.split("_", 2)
+                        if len(parts) >= 3 and parts[1]:
+                            master_id = parts[1]
+                    
+                    if not master_id:
+                        logger.warning(f"Table name '{table}' does not match expected 'detail_<master_id>_<suffix>' pattern.")
+
                     source_link = "Unknown Source"
                     if master_id:
                         cur = conn.cursor()
@@ -279,7 +308,7 @@ class AgentManager:
                         if row:
                             source_link = row[0]
 
-                    source_name = os.path.basename(source_link)
+                    source_name = self._get_display_name(source_link)
                     df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
                     context += f"\n---\nSource: {source_name}\nLink: {source_link}\nTable Data:\n{df.to_string(index=False)}\n"
                 except Exception as e:
@@ -302,7 +331,7 @@ class AgentManager:
                         payload = point.payload
                         text_content = payload.get('text') or str(payload)
                         source_link = payload.get('source', 'Unknown')
-                        source_name = os.path.basename(source_link)
+                        source_name = self._get_display_name(source_link)
                         context += f"\n---\nSource: {source_name}\nLink: {source_link}\nContent:\n{text_content}\n"
             except Exception as e:
                 logger.error(f"Error retrieving Qdrant points: {e}")
@@ -329,7 +358,7 @@ class AgentManager:
              payload = point.payload
              text = payload.get('text', str(payload))
              source_link = payload.get('source', 'Unknown')
-             source_name = os.path.basename(source_link)
+             source_name = self._get_display_name(source_link)
              semantic_context += f"- [Source: {source_name} | Link: {source_link}]: {text}\n"
 
         # Final Synthesis
@@ -349,7 +378,7 @@ class AgentManager:
                 payload = getattr(point, "payload", {})
                 text = payload.get('text', str(payload))
                 source_link = payload.get('source', 'Unknown')
-                source_name = os.path.basename(source_link)
+                source_name = self._get_display_name(source_link)
                 semantic_lines.append(f"- [Source: {source_name} | Link: {source_link}]: {text}")
             semantic_data = "\n".join(semantic_lines)
             

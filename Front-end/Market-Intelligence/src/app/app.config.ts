@@ -8,12 +8,12 @@ import { SecurityContext } from '@angular/core';
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    provideZoneChangeDetection({ eventCoalescing: true }), 
-    provideRouter(routes), 
+    provideZoneChangeDetection({ eventCoalescing: true }),
+    provideRouter(routes),
     provideClientHydration(withEventReplay()),
     provideHttpClient(withFetch()),
     provideMarkdown({
-      sanitize: SecurityContext.NONE
+      sanitize: SecurityContext.HTML
     })
   ]
 };
