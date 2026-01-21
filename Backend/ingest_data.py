@@ -11,6 +11,10 @@ from bs4 import BeautifulSoup
 import pypdf
 from docx import Document
 from pptx import Presentation
+from dotenv import load_dotenv
+from sentence_transformers import SentenceTransformer
+from qdrant_client import QdrantClient
+from qdrant_client.models import VectorParams, Distance, PointStruct
 
 load_dotenv()
 
@@ -29,6 +33,7 @@ class DataIngester:
     def __init__(self):
         self.conn = sqlite3.connect(DB_PATH)
         self.cursor = self.conn.cursor()
+        self.summary_report = {"success": [], "failed": [], "skipped": []}
         
         # Initialize Embedder
         logger.info("Loading embedding model...")
@@ -85,6 +90,10 @@ class DataIngester:
              logger.error(f"Invalid URL format: {input_path}")
              return
              
+        # Sanitize title
+        title = re.sub(r'[^\w\s-]', '', title).strip()
+        if not title: title = "Untitled Dataset"
+
         try:
              # 1. Level 1: Insert into Master and get assigned ID
             master_id, routing_table_name = self._create_master_entry(title, input_path, source_type, summary, sectors)
@@ -100,6 +109,12 @@ class DataIngester:
                 self._process_docx(input_path, master_id, routing_table_name, sectors)
             elif st_lower == 'pptx' or input_path.endswith('.pptx'):
                 self._process_pptx(input_path, master_id, routing_table_name, sectors)
+            
+            self.summary_report["success"].append(input_path)
+        except Exception as e:
+            logger.error(f"Ingestion failed for {input_path}: {e}")
+            self.summary_report["failed"].append({"path": input_path, "error": str(e)})
+            raise e
                 
             logger.info("Ingestion Complete.")
             
@@ -194,10 +209,54 @@ class DataIngester:
             logger.error(f"PDF processing failed for {file_path}: {e}")
             raise e
 
+    def _extract_docx_text(self, doc: Document) -> str:
+        """
+        Extract text from a DOCX document, including body paragraphs, tables,
+        headers, footers, and text boxes where possible.
+        """
+        texts = []
+        # Body paragraphs
+        for para in doc.paragraphs:
+            if para.text and para.text.strip():
+                texts.append(para.text)
+        # Tables
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        if para.text and para.text.strip():
+                            texts.append(para.text)
+        # Headers/Footers
+        for section in doc.sections:
+            for hdr_ftr in (section.header, section.footer):
+                if not hdr_ftr: continue
+                for para in hdr_ftr.paragraphs:
+                    if para.text and para.text.strip():
+                        texts.append(para.text)
+                for table in hdr_ftr.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for para in cell.paragraphs:
+                                if para.text and para.text.strip():
+                                    texts.append(para.text)
+        # Text boxes via XML
+        try:
+            root = doc.part.element
+            ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+            for t in root.xpath(".//w:txbxContent//w:t", namespaces=ns):
+                if t.text and t.text.strip():
+                    texts.append(t.text)
+        except:
+            pass
+        return "\n".join(texts)
+
     def _process_docx(self, file_path, master_id, routing_table_name, sectors):
         try:
             doc = Document(file_path)
-            text = "\n".join([para.text for para in doc.paragraphs])
+            text = self._extract_docx_text(doc)
+            if not text or not text.strip():
+                logger.warning(f"Skipping DOCX with no extractable text: {file_path}")
+                return
             self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, "Document Content")
             self.conn.commit()
         except Exception as e:
@@ -254,6 +313,27 @@ class DataIngester:
                 INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, qdrant_source, qdrant_point_id)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (master_id, f"{title_prefix} Part {k+1}", "Text", sectors, source, point_id))
+        
+        self.conn.commit()
+
+    def print_summary(self):
+        print("\n" + "="*50)
+        print("INGESTION SUMMARY")
+        print("="*50)
+        print(f"Successfully processed: {len(self.summary_report['success'])}")
+        print(f"Failed: {len(self.summary_report['failed'])}")
+        print(f"Skipped: {len(self.summary_report['skipped'])}")
+        
+        if self.summary_report['failed']:
+            print("\nFailures:")
+            for item in self.summary_report['failed']:
+                print(f"- {item['path']}: {item['error']}")
+        
+        if self.summary_report['skipped']:
+            print("\nSkipped (Unsupported):")
+            for item in self.summary_report['skipped']:
+                print(f"- {item}")
+        print("="*50 + "\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest data into Market Intelligence V2 Ecosystem")
@@ -283,7 +363,12 @@ if __name__ == "__main__":
                     try:
                         ingester.process_input(full_path, f_type, f_title, args.sectors, args.summary)
                     except Exception as e:
-                        logger.error(f"Failed to process {full_path}: {e}")
+                        # Error already logged and added to summary in process_input
+                        pass
+                else:
+                    ingester.summary_report["skipped"].append(file)
+                    logger.debug(f"Skipping unsupported file: {file}")
+
     else:
         # Use provided type or auto-detect
         type_map = {'.xlsx': 'excel', '.xls': 'excel', '.pdf': 'pdf', '.docx': 'docx', '.pptx': 'pptx'}
@@ -299,6 +384,8 @@ if __name__ == "__main__":
             try:
                 ingester.process_input(args.input, f_type, f_title, args.sectors, args.summary)
             except Exception as e:
-                logger.error(f"Failed to process {args.input}: {e}")
+                pass
+
+    ingester.print_summary()
 
 
