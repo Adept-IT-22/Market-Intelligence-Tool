@@ -8,14 +8,9 @@ import requests
 import sqlite3
 from datetime import datetime
 from bs4 import BeautifulSoup
+import pypdf
 from docx import Document
 from pptx import Presentation
-
-# Qdrant & Embedding Imports
-from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct, VectorParams, Distance
-from sentence_transformers import SentenceTransformer
-from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -81,28 +76,12 @@ class DataIngester:
 
         # Validate Input BEFORE creating Master entry
         supported_types = ['excel', 'pdf', 'url', 'docx', 'pptx']
-        if source_type.lower() not in supported_types:
+        st_lower = source_type.lower()
+        if st_lower not in supported_types:
              logger.error(f"Unsupported source type: {source_type}")
              return
 
-        if source_type.lower() == 'url' and not input_path.startswith(('http://', 'https://')):
-             logger.error(f"Invalid URL format: {input_path}")
-             return
-             
-    def process_input(self, input_path: str, source_type: str, title: str, sectors: str, summary: str):
-        logger.info(f"Processing {source_type}: {input_path}")
-        
-        # Normalize input path
-        if not input_path.startswith(('http://', 'https://')):
-            input_path = os.path.abspath(input_path)
-
-        # Validate Input BEFORE creating Master entry
-        supported_types = ['excel', 'pdf', 'url', 'docx', 'pptx']
-        if source_type.lower() not in supported_types:
-             logger.error(f"Unsupported source type: {source_type}")
-             return
-
-        if source_type.lower() == 'url' and not input_path.startswith(('http://', 'https://')):
+        if st_lower == 'url' and not input_path.startswith(('http://', 'https://')):
              logger.error(f"Invalid URL format: {input_path}")
              return
              
@@ -111,7 +90,6 @@ class DataIngester:
             master_id, routing_table_name = self._create_master_entry(title, input_path, source_type, summary, sectors)
             
             # 2. Level 2 & 3: Process content
-            st_lower = source_type.lower()
             if st_lower == 'excel' or input_path.endswith(('.xlsx', '.xls')):
                 self._process_excel(input_path, master_id, routing_table_name, sectors)
             elif st_lower == 'pdf' or input_path.endswith('.pdf'):
@@ -144,7 +122,7 @@ class DataIngester:
         
         logger.info(f"Creating Master Entry: {title}")
         self.cursor.execute("""
-            INSERT INTO Master (Title, Source, Summary, Datatype, Sectors, table_name, "Month Created")
+            INSERT INTO Master (Title, Source, Summary, Datatype, Sectors, table_name, month_created)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (title, source, summary, source_type, sectors, "PENDING", month_str))
         
@@ -205,7 +183,6 @@ class DataIngester:
             raise e
 
     def _process_pdf(self, file_path, master_id, routing_table_name, sectors):
-        import pypdf
         try:
             reader = pypdf.PdfReader(file_path)
             for i, page in enumerate(reader.pages):
