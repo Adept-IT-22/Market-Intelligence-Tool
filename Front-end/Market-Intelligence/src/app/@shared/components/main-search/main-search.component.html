@@ -70,14 +70,45 @@
 
     <!-- Sticky Input Container -->
     <div class="input-container">
+        <!-- Attached Files Preview -->
+        <div class="attached-files" *ngIf="attachedFiles.length > 0">
+            <div *ngFor="let file of attachedFiles; let i = index" class="attached-file">
+                <mat-icon>description</mat-icon>
+                <span class="file-name">{{ file.name }}</span>
+                <span class="file-size">({{ formatFileSize(file.size) }})</span>
+                <button class="remove-file-btn" (click)="removeFile(i)" title="Remove">
+                    <mat-icon>close</mat-icon>
+                </button>
+            </div>
+        </div>
+
         <div class="input-wrapper">
+            <!-- Hidden File Input -->
+            <input 
+                type="file" 
+                #fileInput 
+                hidden 
+                [accept]="acceptedFileTypes"
+                (change)="onFileSelected($event)"
+            />
+
+            <!-- Upload Button -->
+            <button 
+                class="upload-btn" 
+                (click)="fileInput.click()" 
+                [disabled]="isLoading"
+                title="Attach file (Max 10MB)"
+            >
+                <mat-icon>attach_file</mat-icon>
+            </button>
+
             <textarea #queryInput class="search-input" rows="1" [(ngModel)]="query" placeholder="Message Intelligence..."
                 (keydown.enter)="$event.preventDefault(); sendQuery()"></textarea>
 
-            <button class="send-btn" [disabled]="!query.trim() || isLoading" (click)="sendQuery()">
+            <button class="send-btn" [disabled]="(!query.trim() && attachedFiles.length === 0) || isLoading" (click)="sendQuery()">
                 <mat-icon>{{ isLoading ? 'hourglass_empty' : 'send' }}</mat-icon>
             </button>
         </div>
-        <p class="input-footer">AI can make mistakes. Verify important info.</p>
+        <p class="input-footer">AI can make mistakes. Verify important info. Max file size: 10MB</p>
     </div>
 </div>
