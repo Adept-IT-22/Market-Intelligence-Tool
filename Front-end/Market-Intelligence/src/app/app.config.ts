@@ -1,10 +1,9 @@
-import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';
+import { ApplicationConfig, provideZoneChangeDetection, SecurityContext } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient, withFetch } from '@angular/common/http';
 import { routes } from './app.routes';
 import { provideClientHydration, withEventReplay } from '@angular/platform-browser';
 import { provideMarkdown } from 'ngx-markdown';
-import { SecurityContext } from '@angular/core';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -13,7 +12,7 @@ export const appConfig: ApplicationConfig = {
     provideClientHydration(withEventReplay()),
     provideHttpClient(withFetch()),
     provideMarkdown({
-      sanitize: SecurityContext.HTML
+      sanitize: SecurityContext.NONE
     })
   ]
 };
