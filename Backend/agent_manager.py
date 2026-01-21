@@ -9,6 +9,8 @@ from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 import logging
 import json
+import re
+from urllib.parse import urlparse
 
 load_dotenv()
 
@@ -90,7 +92,6 @@ class AgentManager:
         # Handle URLs
         if uri.startswith(('http://', 'https://')):
             try:
-                from urllib.parse import urlparse
                 parsed = urlparse(uri)
                 # If there's a path beyond '/', get the last segment
                 path_segments = [s for s in parsed.path.split('/') if s]
@@ -98,7 +99,8 @@ class AgentManager:
                     return path_segments[-1]
                 # Fallback to domain
                 return parsed.netloc
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to parse URI '{uri}': {e}")
                 return uri
         
         # Handle File Paths
@@ -135,14 +137,22 @@ class AgentManager:
 
         # 2. Fetch only the relevant Master entries
         conn = sqlite3.connect(self.database_path)
-        placeholders = ', '.join(['?'] * len(candidate_routing_tables))
+        # Validate that candidate table names are safe to include in the query
+        safe_candidates = [t for t in candidate_routing_tables if re.match(r'^[a-z0-9_]+$', t)]
+        
+        if not safe_candidates:
+            logger.warning("No safe candidate routing tables after validation.")
+            conn.close()
+            return []
+
+        placeholders = ', '.join(['?'] * len(safe_candidates))
         query = f"SELECT id, Title, Source, Summary, Datatype, Sectors, table_name FROM Master WHERE table_name IN ({placeholders})"
-        df_master = pd.read_sql_query(query, conn, params=list(candidate_routing_tables))
+        df_master = pd.read_sql_query(query, conn, params=safe_candidates)
         conn.close()
         
         if df_master.empty:
-            logger.warning("No matching Master entries for candidates.")
-            return list(candidate_routing_tables) # Return candidates anyway if DB lookup fails?
+            logger.warning("No matching Master entries for candidates in database.")
+            return [] # Returning empty list instead of unverified candidates as per best practice
 
         master_context = df_master.to_string(index=False)
 
@@ -319,8 +329,9 @@ class AgentManager:
         qdrant_ids = selection.get('qdrant_ids', [])
         if qdrant_ids:
             try:
-                # Validate IDs briefly (UUID check or length)
-                safe_ids = [qid for qid in qdrant_ids if len(qid) > 10] # basic check
+                # Stronger UUID validation: 8-4-4-4-12 hex digits
+                uuid_regex = re.compile(r'^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$', re.IGNORECASE)
+                safe_ids = [qid for qid in qdrant_ids if uuid_regex.match(str(qid))]
                 
                 if safe_ids:
                     points = self.qdrant_client.retrieve(
