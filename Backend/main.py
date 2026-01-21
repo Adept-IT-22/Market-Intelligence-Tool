@@ -57,6 +57,83 @@ def run_query()->Dict:
         logger.error(f"Couldn't run the query: {str(e)}")
         return {"Error": str(e)}, 500
 
+# ============== FILE UPLOAD ENDPOINT ==============
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Configuration
+ALLOWED_EXTENSIONS = {'pdf', 'docx', 'pptx', 'xlsx', 'xls', 'txt', 'csv', 'png', 'jpg', 'jpeg'}
+MAX_FILE_SIZE_MB = 10
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    """
+    Upload a file for analysis.
+    - Max size: 10MB
+    - Allowed types: pdf, docx, pptx, xlsx, xls, txt, csv, png, jpg, jpeg
+    """
+    start_time = time.perf_counter()
+    
+    if 'file' not in request.files:
+        return {"error": "No file part in the request"}, 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return {"error": "No file selected"}, 400
+    
+    # Validate file type
+    if not allowed_file(file.filename):
+        return {
+            "error": f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+        }, 400
+    
+    # Validate file size
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+    file.seek(0)
+    
+    if file_size > MAX_FILE_SIZE_BYTES:
+        return {
+            "error": f"File too large. Maximum size: {MAX_FILE_SIZE_MB}MB"
+        }, 400
+    
+    # Save the file
+    from werkzeug.utils import secure_filename
+    filename = secure_filename(file.filename)
+    timestamp = int(time.time())
+    unique_filename = f"{timestamp}_{filename}"
+    file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
+    
+    try:
+        file.save(file_path)
+        logger.info(f"File uploaded: {unique_filename} ({file_size / 1024:.1f} KB)")
+        
+        duration = time.perf_counter() - start_time
+        return {
+            "success": True,
+            "filename": unique_filename,
+            "original_filename": filename,
+            "size_kb": round(file_size / 1024, 1),
+            "path": file_path,
+            "execution_time": round(duration, 2)
+        }, 200
+    except Exception as e:
+        logger.error(f"Failed to save uploaded file: {e}")
+        return {"error": "Failed to save file"}, 500
+
+@app.route('/upload/limits', methods=['GET'])
+def get_upload_limits():
+    """Return the current upload limits for the frontend."""
+    return {
+        "max_size_mb": MAX_FILE_SIZE_MB,
+        "allowed_extensions": list(ALLOWED_EXTENSIONS)
+    }
+
 if __name__ == "__main__":
     logger.info("App starting...")
     
