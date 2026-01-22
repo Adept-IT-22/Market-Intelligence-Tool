@@ -26,7 +26,7 @@ QDRANT_URL = os.getenv("QDRANT_URL")
 # Project Paths
 current_directory = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_directory)
-DATABASE_PATH = os.path.join(project_root, "DB", "market-intelligence.db")
+DATABASE_PATH = os.getenv("DATABASE_PATH")
 
 # Models
 LLM_MODEL_NAME = "llama-3.1-8b-instant"
@@ -151,7 +151,8 @@ class AgentManager:
         conn.close()
         
         if df_master.empty:
-            logger.warning("No matching Master entries for candidates in database.")
+            logger.warning("No matching Master entries for candidates in database." \
+            "semantic_candidates = %d, safe_candidates = %d", len(candidate_routing_tables), len(safe_candidates))
             return [] # Returning empty list instead of unverified candidates as per best practice
 
         master_context = df_master.to_string(index=False)
