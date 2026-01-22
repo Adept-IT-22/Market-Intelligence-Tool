@@ -28,6 +28,10 @@ current_directory = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_directory)
 DATABASE_PATH = os.getenv("DATABASE_PATH")
 
+if not DATABASE_PATH:
+    DATABASE_PATH = os.path.join(project_root, "DB", "market-intelligence.db")
+    logger.info(f"DATABASE_PATH not found in .env, using default: {DATABASE_PATH}")
+
 # Models
 LLM_MODEL_NAME = "llama-3.1-8b-instant"
 EMBEDDING_MODEL = "BAAI/bge-small-en"
@@ -289,62 +293,72 @@ class AgentManager:
         """
         logger.info("Level 3: Fetching Detail Content...")
         context = ""
+        max_chars = 15000 # Stay safe within Groq's 6k token limit (~18k-24k chars)
         
         # 1. Fetch SQL Details
         sql_tables = selection.get('sql_tables', [])
         if sql_tables:
             conn = sqlite3.connect(self.database_path)
             for table in sql_tables:
-                # Validate table name (basic injection check)
+                if len(context) >= max_chars: break
+                
                 if not table.isidentifier() and not table.replace('_', '').isalnum(): 
-                     logger.warning(f"Skipping suspicious table name in detail fetch: {table}")
+                     logger.warning(f"Skipping suspicious table name: {table}")
                      continue
 
                 try:
-                    # Robust extraction of master_id from table name (expected: detail_<master_id>_<suffix>)
+                    # Robust extraction of master_id
                     master_id = None
-                    if table.startswith("detail_"):
-                        parts = table.split("_", 2)
-                        if len(parts) >= 3 and parts[1]:
-                            master_id = parts[1]
+                    if table.startswith("route_"): # Handle route tables if selected
+                         parts = table.split("_")
+                         if len(parts) >= 2: master_id = parts[-1] 
+                    elif table.startswith("detail_"):
+                         parts = table.split("_", 2)
+                         if len(parts) >= 3: master_id = parts[1]
                     
-                    if not master_id:
-                        logger.warning(f"Table name '{table}' does not match expected 'detail_<master_id>_<suffix>' pattern.")
-
-                    source_link = "Unknown Source"
-                    if master_id:
+                    source_link = "Unknown"
+                    if master_id and master_id.isdigit():
                         cur = conn.cursor()
                         cur.execute("SELECT Source FROM Master WHERE id = ?", (master_id,))
                         row = cur.fetchone()
-                        if row:
-                            source_link = row[0]
+                        if row: source_link = row[0]
 
                     source_name = self._get_display_name(source_link)
-                    df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                    context += f"\n---\nSource: {source_name}\nLink: {source_link}\nTable Data:\n{df.to_string(index=False)}\n"
+                    df = pd.read_sql_query(f'SELECT * FROM "{table}" LIMIT 10', conn) # Limit rows
+                    table_text = f"\n---\nSource: {source_name}\nData:\n{df.to_string(index=False)}\n"
+                    
+                    if len(context) + len(table_text) > max_chars:
+                        context += table_text[:max_chars - len(context)] + "...[Truncated]"
+                        break
+                    context += table_text
                 except Exception as e:
-                    logger.error(f"Error reading Detail SQL {table}: {e}")
+                    logger.error(f"Error reading SQL {table}: {e}")
             conn.close()
             
         # 2. Fetch Qdrant Details
         qdrant_ids = selection.get('qdrant_ids', [])
-        if qdrant_ids:
+        if qdrant_ids and len(context) < max_chars:
             try:
-                # Stronger UUID validation: 8-4-4-4-12 hex digits
-                uuid_regex = re.compile(r'^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$', re.IGNORECASE)
-                safe_ids = [qid for qid in qdrant_ids if uuid_regex.match(str(qid))]
+                # Limit number of points to fetch to stay under tokens
+                fetch_limit = 15
+                safe_ids = qdrant_ids[:fetch_limit]
                 
-                if safe_ids:
-                    points = self.qdrant_client.retrieve(
-                        collection_name=self.collection_name,
-                        ids=safe_ids
-                    )
-                    for point in points:
-                        payload = point.payload
-                        text_content = payload.get('text') or str(payload)
-                        source_link = payload.get('source', 'Unknown')
-                        source_name = self._get_display_name(source_link)
-                        context += f"\n---\nSource: {source_name}\nLink: {source_link}\nContent:\n{text_content}\n"
+                points = self.qdrant_client.retrieve(
+                    collection_name=self.collection_name,
+                    ids=safe_ids
+                )
+                for point in points:
+                    if len(context) >= max_chars: break
+                    payload = point.payload
+                    text_content = payload.get('text') or str(payload)
+                    source_link = payload.get('source', 'Unknown')
+                    source_name = self._get_display_name(source_link)
+                    
+                    point_text = f"\n---\nSource: {source_name}\nContent:\n{text_content}\n"
+                    if len(context) + len(point_text) > max_chars:
+                        context += point_text[:max_chars - len(context)] + "...[Truncated]"
+                        break
+                    context += point_text
             except Exception as e:
                 logger.error(f"Error retrieving Qdrant points: {e}")
                 
