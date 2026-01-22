@@ -246,7 +246,7 @@ class DataIngester:
             for t in root.xpath(".//w:txbxContent//w:t", namespaces=ns):
                 if t.text and t.text.strip():
                     texts.append(t.text)
-        except:
+        except Exception:
             pass
         return "\n".join(texts)
 
