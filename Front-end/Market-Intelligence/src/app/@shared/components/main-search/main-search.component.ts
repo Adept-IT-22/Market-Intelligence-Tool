@@ -204,7 +204,7 @@ export class MainSearchComponent implements AfterViewChecked {
     let result = text;
 
     // Pass 1: Handle [Source: filename | Link: path] format
-    result = result.replace(/\[Source:\s*([^\|]+)\s*\|\s*Link:\s*([^\]]+)\]/g, (match, filename, localPath) => {
+    result = result.replace(/\[Source:\s*([^|]+)\s*\|\s*Link:\s*([^\]]+)\]/g, (match, filename, localPath) => {
       const trimmedFilename = filename.trim();
       const trimmedPath = localPath.trim();
       if (trimmedPath.includes('\\') || trimmedPath.startsWith('C:')) {
