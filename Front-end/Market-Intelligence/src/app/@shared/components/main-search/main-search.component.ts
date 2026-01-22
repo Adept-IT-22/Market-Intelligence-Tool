@@ -4,7 +4,7 @@ import { Component, ElementRef, ViewChild, AfterViewChecked } from '@angular/cor
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { MarkdownModule } from 'ngx-markdown';
-import { environment } from '../../../../environments/environment';
+import { environment } from '@environments/environment';
 import { gsap } from 'gsap';
 
 interface ChatMessage {
@@ -233,23 +233,91 @@ export class MainSearchComponent implements AfterViewChecked {
     }, 2000);
   }
 
+  /**
+   * Transforms file references to SharePoint URLs.
+   * Handles multiple formats:
+   * 1. Standard markdown: [filename](local_path)
+   * 2. Source/Link format: [Source: filename | Link: path]
+   * 3. Removes duplicate filenames before links
+   */
+  private transformReferences(text: string): string {
+    // Base SharePoint URL for the document library
+    const sharepointBase = 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents';
+
+    // Local sync folder path (what gets synced to SharePoint)
+    const localBasePath = 'C:\\Users\\imain\\Adept Technologies Ltd\\30. Cloud & Business Automation - Documents';
+    const localBasePathAlt = 'C:/Users/imain/Adept Technologies Ltd/30. Cloud & Business Automation - Documents';
+
+    // Helper function to convert local path to SharePoint URL
+    const toSharePointUrl = (localPath: string): string => {
+      let relativePath = localPath
+        .replace(localBasePath, '')
+        .replace(localBasePathAlt, '')
+        .replace(/\\/g, '/')
+        .replace(/^\//, '');
+
+      const encodedPath = relativePath
+        .split('/')
+        .map((segment: string) => encodeURIComponent(segment))
+        .join('/');
+
+      return `${sharepointBase}/${encodedPath}`;
+    };
+
+    let result = text;
+
+    // Pass 1: Handle [Source: filename | Link: path] format
+    result = result.replace(/\[Source:\s*([^|]+)\s*\|\s*Link:\s*([^\]]+)\]/g, (match, filename, localPath) => {
+      const trimmedFilename = filename.trim();
+      const trimmedPath = localPath.trim();
+      if (trimmedPath.includes('\\') || trimmedPath.startsWith('C:')) {
+        return `[${trimmedFilename}](${toSharePointUrl(trimmedPath)})`;
+      }
+      return `[${trimmedFilename}](${trimmedPath})`;
+    });
+
+    // Pass 2: Remove duplicate filename that appears before the markdown link
+    // Pattern: "filename [filename](path)" -> "[filename](path)"
+    result = result.replace(/([^\[\]]+?)\s+\[([^\]]+)\]\(/g, (match, before, inBrackets) => {
+      // Only remove the leading text if it matches the text inside the brackets
+      if (before.trim() === inBrackets.trim()) {
+        return `[${inBrackets}](`;
+      }
+      return match;
+    });
+
+    // Pass 3: Convert standard markdown local paths to SharePoint URLs
+    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, localPath) => {
+      // Check if this is a local file path
+      if (localPath.includes('\\') || localPath.startsWith('C:')) {
+        return `[${filename}](${toSharePointUrl(localPath)})`;
+      }
+      // Already a URL or not a local path
+      return match;
+    });
+
+    return result;
+  }
+
   private typewriteResponse(thread: ChatThread, fullText: string) {
+    // Transform the text to clean up file references
+    const transformedText = this.transformReferences(fullText);
     const proxy = { value: 0 };
-    const duration = Math.min(fullText.length * 0.005, 10);
+    const duration = Math.min(transformedText.length * 0.005, 10);
 
     gsap.to(proxy, {
-      value: fullText.length,
+      value: transformedText.length,
       duration: duration,
       ease: "none",
       onUpdate: () => {
         const charIndex = Math.floor(proxy.value);
         if (thread.aiMessage) {
-          thread.aiMessage.content = fullText.substring(0, charIndex);
+          thread.aiMessage.content = transformedText.substring(0, charIndex);
         }
       },
       onComplete: () => {
         if (thread.aiMessage) {
-          thread.aiMessage.content = fullText;
+          thread.aiMessage.content = transformedText;
         }
         thread.isTyping = false;
       }
