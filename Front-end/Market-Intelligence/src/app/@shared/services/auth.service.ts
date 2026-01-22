@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { environment } from '@environments/environment';
+import { environment } from '../../../environments/environment';
 import { tap, catchError, of, map } from 'rxjs';
 
 export interface User {
@@ -19,7 +19,7 @@ interface AuthResponse {
 })
 export class AuthService {
   private readonly TOKEN_KEY = 'mit_auth_token';
-  
+
   // Use signals for reactive state
   currentUser = signal<User | null>(null);
   isAuthenticated = signal<boolean>(false);
@@ -60,7 +60,7 @@ export class AuthService {
   }
 
   getMe() {
-    return this.http.get<{user: User}>(`${environment.apiUrl}/auth/me`, {
+    return this.http.get<{ user: User }>(`${environment.apiUrl}/auth/me`, {
       headers: { 'Authorization': `Bearer ${this.getToken()}` }
     }).pipe(
       tap(res => {
