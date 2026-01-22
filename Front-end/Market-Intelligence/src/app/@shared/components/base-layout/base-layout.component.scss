@@ -4,13 +4,21 @@
     width: 100vw;
     overflow: hidden;
     background-color: var(--bg-primary);
+
+    --sidebar-current-width: var(--sidebar-width);
+
+    &.sidebar-closed {
+        --sidebar-current-width: var(--sidebar-collapsed);
+    }
 }
 
 .sidebar-container {
     height: 100%;
+    width: var(--sidebar-current-width);
     flex-shrink: 0;
     z-index: 101;
     border-right: 1px solid var(--border-color);
+    transition: width var(--transition-base);
 }
 
 .content-wrapper {
@@ -18,6 +26,7 @@
     flex-direction: column;
     flex-grow: 1;
     height: 100%;
+    min-width: 0; // Prevent flex item from overflowing
     overflow: hidden;
     position: relative;
 }
@@ -34,4 +43,8 @@
     overflow-y: auto;
     padding: 24px;
     position: relative;
+
+    @media (max-width: 768px) {
+        padding: 16px;
+    }
 }
