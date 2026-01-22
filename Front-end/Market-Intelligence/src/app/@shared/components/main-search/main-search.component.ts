@@ -4,7 +4,7 @@ import { Component, ElementRef, ViewChild, AfterViewChecked } from '@angular/cor
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { MarkdownModule } from 'ngx-markdown';
-import { environment } from '../../../../environments/environment';
+import { environment } from '@environments/environment';
 import { gsap } from 'gsap';
 
 interface ChatMessage {
@@ -171,8 +171,11 @@ export class MainSearchComponent implements AfterViewChecked {
   }
 
   /**
-   * Transforms markdown file references [filename](local_path) to SharePoint URLs.
-   * Also removes duplicate filenames that appear before the link.
+   * Transforms file references to SharePoint URLs.
+   * Handles multiple formats:
+   * 1. Standard markdown: [filename](local_path)
+   * 2. Source/Link format: [Source: filename | Link: path]
+   * 3. Removes duplicate filenames before links
    */
   private transformReferences(text: string): string {
     // Base SharePoint URL for the document library
@@ -182,32 +185,45 @@ export class MainSearchComponent implements AfterViewChecked {
     const localBasePath = 'C:\\Users\\imain\\Adept Technologies Ltd\\30. Cloud & Business Automation - Documents';
     const localBasePathAlt = 'C:/Users/imain/Adept Technologies Ltd/30. Cloud & Business Automation - Documents';
 
-    // First pass: Remove duplicate filename that appears before the markdown link
-    // Pattern: "filename [filename](path)" -> "[filename](path)"
-    let result = text.replace(/([^\[\]]+?)\s+\[\1\]\(/g, '[$1](');
+    // Helper function to convert local path to SharePoint URL
+    const toSharePointUrl = (localPath: string): string => {
+      let relativePath = localPath
+        .replace(localBasePath, '')
+        .replace(localBasePathAlt, '')
+        .replace(/\\/g, '/')
+        .replace(/^\//, '');
 
-    // Second pass: Convert local paths to SharePoint URLs
+      const encodedPath = relativePath
+        .split('/')
+        .map((segment: string) => encodeURIComponent(segment))
+        .join('/');
+
+      return `${sharepointBase}/${encodedPath}`;
+    };
+
+    let result = text;
+
+    // Pass 1: Handle [Source: filename | Link: path] format
+    result = result.replace(/\[Source:\s*([^\|]+)\s*\|\s*Link:\s*([^\]]+)\]/g, (match, filename, localPath) => {
+      const trimmedFilename = filename.trim();
+      const trimmedPath = localPath.trim();
+      if (trimmedPath.includes('\\') || trimmedPath.startsWith('C:')) {
+        return `[${trimmedFilename}](${toSharePointUrl(trimmedPath)})`;
+      }
+      return `[${trimmedFilename}](${trimmedPath})`;
+    });
+
+    // Pass 2: Remove duplicate filename that appears before the markdown link
+    // Pattern: "filename [filename](path)" -> "[filename](path)"
+    result = result.replace(/([^\[\]]+?)\s+\[\1\]\(/g, '[$1](');
+
+    // Pass 3: Convert standard markdown local paths to SharePoint URLs
     result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, localPath) => {
       // Check if this is a local file path
       if (localPath.includes('\\') || localPath.startsWith('C:')) {
-        // Normalize path separators
-        let relativePath = localPath
-          .replace(localBasePath, '')
-          .replace(localBasePathAlt, '')
-          .replace(/\\/g, '/')
-          .replace(/^\//, ''); // Remove leading slash
-
-        // URL encode the path (but keep forward slashes)
-        const encodedPath = relativePath
-          .split('/')
-          .map((segment: string) => encodeURIComponent(segment))
-          .join('/');
-
-        const sharepointUrl = `${sharepointBase}/${encodedPath}`;
-        return `[${filename}](${sharepointUrl})`;
+        return `[${filename}](${toSharePointUrl(localPath)})`;
       }
-
-      // Return original if not a local path
+      // Already a URL or not a local path
       return match;
     });
 
