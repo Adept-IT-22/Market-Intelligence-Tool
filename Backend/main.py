@@ -119,7 +119,6 @@ def upload_file():
             "filename": unique_filename,
             "original_filename": filename,
             "size_kb": round(file_size / 1024, 1),
-            "path": file_path,
             "execution_time": round(duration, 2)
         }, 200
     except Exception as e:
