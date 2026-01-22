@@ -246,7 +246,7 @@ class DataIngester:
             for t in root.xpath(".//w:txbxContent//w:t", namespaces=ns):
                 if t.text and t.text.strip():
                     texts.append(t.text)
-        except:
+        except Exception:
             pass
         return "\n".join(texts)
 
@@ -384,6 +384,7 @@ if __name__ == "__main__":
             try:
                 ingester.process_input(args.input, f_type, f_title, args.sectors, args.summary)
             except Exception as e:
+                # Error already logged and added to summary in process_input
                 pass
 
     ingester.print_summary()
