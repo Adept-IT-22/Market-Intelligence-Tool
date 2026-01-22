@@ -170,23 +170,69 @@ export class MainSearchComponent implements AfterViewChecked {
     }, 2000);
   }
 
+  /**
+   * Transforms markdown file references [filename](local_path) to SharePoint URLs.
+   * Also removes duplicate filenames that appear before the link.
+   */
+  private transformReferences(text: string): string {
+    // Base SharePoint URL for the document library
+    const sharepointBase = 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents';
+
+    // Local sync folder path (what gets synced to SharePoint)
+    const localBasePath = 'C:\\Users\\imain\\Adept Technologies Ltd\\30. Cloud & Business Automation - Documents';
+    const localBasePathAlt = 'C:/Users/imain/Adept Technologies Ltd/30. Cloud & Business Automation - Documents';
+
+    // First pass: Remove duplicate filename that appears before the markdown link
+    // Pattern: "filename [filename](path)" -> "[filename](path)"
+    let result = text.replace(/([^\[\]]+?)\s+\[\1\]\(/g, '[$1](');
+
+    // Second pass: Convert local paths to SharePoint URLs
+    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, localPath) => {
+      // Check if this is a local file path
+      if (localPath.includes('\\') || localPath.startsWith('C:')) {
+        // Normalize path separators
+        let relativePath = localPath
+          .replace(localBasePath, '')
+          .replace(localBasePathAlt, '')
+          .replace(/\\/g, '/')
+          .replace(/^\//, ''); // Remove leading slash
+
+        // URL encode the path (but keep forward slashes)
+        const encodedPath = relativePath
+          .split('/')
+          .map((segment: string) => encodeURIComponent(segment))
+          .join('/');
+
+        const sharepointUrl = `${sharepointBase}/${encodedPath}`;
+        return `[${filename}](${sharepointUrl})`;
+      }
+
+      // Return original if not a local path
+      return match;
+    });
+
+    return result;
+  }
+
   private typewriteResponse(thread: ChatThread, fullText: string) {
+    // Transform the text to clean up file references
+    const transformedText = this.transformReferences(fullText);
     const proxy = { value: 0 };
-    const duration = Math.min(fullText.length * 0.005, 10);
+    const duration = Math.min(transformedText.length * 0.005, 10);
 
     gsap.to(proxy, {
-      value: fullText.length,
+      value: transformedText.length,
       duration: duration,
       ease: "none",
       onUpdate: () => {
         const charIndex = Math.floor(proxy.value);
         if (thread.aiMessage) {
-          thread.aiMessage.content = fullText.substring(0, charIndex);
+          thread.aiMessage.content = transformedText.substring(0, charIndex);
         }
       },
       onComplete: () => {
         if (thread.aiMessage) {
-          thread.aiMessage.content = fullText;
+          thread.aiMessage.content = transformedText;
         }
         thread.isTyping = false;
       }
