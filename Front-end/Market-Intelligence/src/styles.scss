@@ -14,6 +14,9 @@
     --accent-secondary: #4f46e5;
     --accent-gradient: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
 
+    /* Link color - amber/golden for dark mode */
+    --link-color: #f59e0b;
+
     --border-color: rgba(255, 255, 255, 0.1);
     --glass-bg: rgba(20, 20, 30, 0.7);
     --glass-border: rgba(255, 255, 255, 0.08);
@@ -40,6 +43,9 @@
     --border-color: rgba(0, 0, 0, 0.1);
     --glass-bg: rgba(255, 255, 255, 0.8);
     --glass-border: rgba(0, 0, 0, 0.05);
+
+    /* Link color - purple for light mode */
+    --link-color: #7c3aed;
 }
 
 * {
