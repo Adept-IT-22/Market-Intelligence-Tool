@@ -1,4 +1,4 @@
-import { Component, signal } from '@angular/core';
+import { Component, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
@@ -25,6 +25,10 @@ import { AuthService } from '../../services/auth.service';
     styleUrl: './auth-modal.component.scss'
 })
 export class AuthModalComponent {
+    private fb = inject(FormBuilder);
+    private auth = inject(AuthService);
+    private dialogRef = inject(MatDialogRef<AuthModalComponent>);
+
     mode = signal<'login' | 'signup'>('login');
     isLoading = signal<boolean>(false);
     errorMessage = signal<string | null>(null);
@@ -34,12 +38,6 @@ export class AuthModalComponent {
         password: ['', [Validators.required, Validators.minLength(6)]],
         displayName: ['']
     });
-
-    constructor(
-        private fb: FormBuilder,
-        private auth: AuthService,
-        private dialogRef: MatDialogRef<AuthModalComponent>
-    ) { }
 
     switchMode() {
         this.mode.set(this.mode() === 'login' ? 'signup' : 'login');
