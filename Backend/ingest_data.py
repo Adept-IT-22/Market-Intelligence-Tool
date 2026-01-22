@@ -384,6 +384,7 @@ if __name__ == "__main__":
             try:
                 ingester.process_input(args.input, f_type, f_title, args.sectors, args.summary)
             except Exception as e:
+                # Error already logged and added to summary in process_input
                 pass
 
     ingester.print_summary()
