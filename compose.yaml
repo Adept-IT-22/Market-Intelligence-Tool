@@ -5,15 +5,17 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    volumes:
-      - ./DB/market-intelligence.db:/app/DB/market-intelligence.db
     env_file:
       - ./Backend/.env 
     environment:
       - QDRANT_HOST=qdrant_official
       - QDRANT_PORT=6333
+      - DATABASE_PATH=/data/market-intelligence.db
+    volumes:
+      - ./DB/market-intelligence.db:/data/market-intelligence.db
     networks:
       - market_intelligence_network
+    restart: always
 
 networks:
   market_intelligence_network:
