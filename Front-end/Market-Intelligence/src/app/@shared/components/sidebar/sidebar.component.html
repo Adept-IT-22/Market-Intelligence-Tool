@@ -1,19 +1,60 @@
-<div class="sidebar-component" [ngClass]="{'closed': !isExpanded}">
+<div class="sidebar-component" [ngClass]="{'closed': !uiService.isSidebarExpanded()}">
     <div class="sidebar-header">
         <button class="toggle-btn" (click)="toggleSidebar()">
-            <mat-icon>{{ isExpanded ? 'menu_open' : 'menu' }}</mat-icon>
+            <mat-icon>{{ uiService.isSidebarExpanded() ? 'menu_open' : 'menu' }}</mat-icon>
         </button>
     </div>
 
     <div class="sidebar-content">
-        <a *ngFor="let item of menuItems" [routerLink]="item.route" routerLinkActive="active"
-            [routerLinkActiveOptions]="{exact: true}" class="nav-item">
-            <mat-icon>{{item.icon}}</mat-icon>
-            <span *ngIf="isExpanded">{{item.name}}</span>
-        </a>
+        <!-- New Chat Button -->
+        <button class="new-chat-btn" (click)="createNewChat()" [title]="'Start New Chat'">
+            <mat-icon>add</mat-icon>
+            <span *ngIf="uiService.isSidebarExpanded()">New Chat</span>
+        </button>
+
+        <!-- Chat History -->
+        <div class="history-section" *ngIf="uiService.isSidebarExpanded()">
+            <h3 class="section-title">History</h3>
+            <div class="chat-list">
+                <div *ngFor="let session of chatService.sessions()" class="chat-item"
+                    [class.active]="chatService.currentSessionId() === session.id" (click)="selectChat(session)">
+
+                    <mat-icon class="chat-icon">forum</mat-icon>
+
+                    <div class="chat-info"
+                        *ngIf="!editingSessionId() || editingSessionId() !== session.id; else editMode"
+                        (dblclick)="startEditing(session, $event)">
+                        <span class="title">{{ session.title }}</span>
+                        <span class="date">{{ session.updated_at | date:'MMM d, h:mm a' }}</span>
+                    </div>
+
+                    <ng-template #editMode>
+                        <input #editInput class="edit-input" [(ngModel)]="editTitle" (keyup.enter)="saveRename(session)"
+                            (keyup.escape)="cancelEditing()" (blur)="saveRename(session)"
+                            (click)="$event.stopPropagation()">
+                    </ng-template>
+
+                    <button class="item-actions" [matMenuTriggerFor]="chatMenu" (click)="$event.stopPropagation()"
+                        *ngIf="!editingSessionId()">
+                        <mat-icon>more_vert</mat-icon>
+                    </button>
+
+                    <mat-menu #chatMenu="matMenu">
+                        <button mat-menu-item (click)="startEditing(session, $event)">
+                            <mat-icon>edit</mat-icon>
+                            <span>Rename</span>
+                        </button>
+                        <button mat-menu-item (click)="deleteChat(session, $event)" class="delete-item">
+                            <mat-icon>delete</mat-icon>
+                            <span>Delete</span>
+                        </button>
+                    </mat-menu>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <div class="sidebar-footer" *ngIf="isExpanded">
+    <div class="sidebar-footer" *ngIf="uiService.isSidebarExpanded()">
         <p>&copy; 2026 El Gringo Analytics</p>
     </div>
 </div>
