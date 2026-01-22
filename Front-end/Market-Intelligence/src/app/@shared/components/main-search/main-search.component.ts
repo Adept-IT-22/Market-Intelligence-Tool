@@ -19,6 +19,14 @@ interface ChatThread {
   loadingStep?: string;
   isTyping?: boolean;
   executionTime?: number;
+  attachedFiles?: UploadedFile[];
+}
+
+interface UploadedFile {
+  name: string;
+  size: number;
+  path: string;
+  uploadedFilename: string;
 }
 
 @Component({
@@ -30,10 +38,18 @@ interface ChatThread {
 })
 export class MainSearchComponent implements AfterViewChecked {
   @ViewChild('scrollContainer') private scrollContainer!: ElementRef;
-  @ViewChild('queryInput') private queryInput!: ElementRef; // Reference to input for focus
+  @ViewChild('queryInput') private queryInput!: ElementRef;
+  @ViewChild('fileInput') private fileInput!: ElementRef;
 
   query: string = '';
   threads: ChatThread[] = [];
+  attachedFiles: File[] = [];
+
+  // Upload limits
+  readonly MAX_FILE_SIZE_MB = 10;
+  readonly MAX_FILE_SIZE_BYTES = this.MAX_FILE_SIZE_MB * 1024 * 1024;
+  readonly ALLOWED_EXTENSIONS = ['pdf', 'docx', 'pptx', 'xlsx', 'xls', 'txt', 'csv', 'png', 'jpg', 'jpeg'];
+  readonly acceptedFileTypes = this.ALLOWED_EXTENSIONS.map(ext => `.${ext}`).join(',');
 
   private loadingSteps = [
     "Analyzing your request...",
@@ -63,47 +79,94 @@ export class MainSearchComponent implements AfterViewChecked {
   }
 
   sendQuery() {
-    if (!this.query.trim()) return;
+    if (!this.query.trim() && this.attachedFiles.length === 0) return;
 
     // 1. Create New Thread
     const newThread: ChatThread = {
       userMessage: {
-        content: this.query,
+        content: this.query || `[Uploaded ${this.attachedFiles.length} file(s)]`,
         timestamp: new Date()
       },
       isLoading: true,
-      loadingStep: this.loadingSteps[0]
+      loadingStep: this.loadingSteps[0],
+      attachedFiles: []
     };
 
     this.threads.push(newThread);
 
     // Save context
     const distinctQuery = this.query;
+    const filesToUpload = [...this.attachedFiles];
     this.query = '';
+    this.attachedFiles = [];
+
+    // Reset file input
+    if (this.fileInput) {
+      this.fileInput.nativeElement.value = '';
+    }
 
     // 2. Start Loading Cycle for this specific thread
     this.cycleLoadingSteps(newThread);
 
-    // 3. Call API
-    const payload = { query: distinctQuery };
+    // 3. Upload files first if any
+    if (filesToUpload.length > 0) {
+      this.uploadFilesAndQuery(newThread, distinctQuery, filesToUpload);
+    } else {
+      this.executeQuery(newThread, distinctQuery);
+    }
+  }
+
+  private uploadFilesAndQuery(thread: ChatThread, query: string, files: File[]) {
+    const uploadPromises = files.map(file => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return this.http.post<any>(`${environment.apiUrl}/upload`, formData).toPromise();
+    });
+
+    Promise.all(uploadPromises)
+      .then(results => {
+        thread.attachedFiles = results.map((r, i) => ({
+          name: files[i].name,
+          size: files[i].size,
+          path: r.path,
+          uploadedFilename: r.filename
+        }));
+
+        // Now execute the query with file context
+        const fileContext = thread.attachedFiles?.map(f => f.name).join(', ');
+        const augmentedQuery = query ? `${query} [Attached: ${fileContext}]` : `Analyze files: ${fileContext}`;
+        this.executeQuery(thread, augmentedQuery);
+      })
+      .catch(err => {
+        console.error('File upload failed', err);
+        thread.isLoading = false;
+        thread.aiMessage = {
+          content: `⚠️ Error uploading file: ${err.error?.error || 'Unknown error'}`,
+          timestamp: new Date()
+        };
+      });
+  }
+
+  private executeQuery(thread: ChatThread, query: string) {
+    const payload = { query };
     this.http.post(`${environment.apiUrl}/query`, payload).subscribe({
       next: (res: any) => {
-        newThread.isLoading = false;
-        newThread.isTyping = true;
-        newThread.executionTime = res.execution_time; // Capture execution time
+        thread.isLoading = false;
+        thread.isTyping = true;
+        thread.executionTime = res.execution_time;
 
-        newThread.aiMessage = {
+        thread.aiMessage = {
           content: '',
           timestamp: new Date()
         };
 
-        // 4. Trigger GSAP Typewriter
-        this.typewriteResponse(newThread, res.Results);
+        // Trigger GSAP Typewriter
+        this.typewriteResponse(thread, res.Results);
       },
       error: (err) => {
         console.error('Error fetching data', err);
-        newThread.isLoading = false;
-        newThread.aiMessage = {
+        thread.isLoading = false;
+        thread.aiMessage = {
           content: "⚠️ Error: Could not reach the intelligence engine. Please try again later.",
           timestamp: new Date()
         };
@@ -191,5 +254,41 @@ export class MainSearchComponent implements AfterViewChecked {
         thread.isTyping = false;
       }
     });
+  }
+
+  // ============ FILE HANDLING ============
+  onFileSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+
+    const file = input.files[0];
+
+    // Validate extension
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!ext || !this.ALLOWED_EXTENSIONS.includes(ext)) {
+      alert(`File type ".${ext}" not allowed. Allowed: ${this.ALLOWED_EXTENSIONS.join(', ')}`);
+      input.value = '';
+      return;
+    }
+
+    // Validate size
+    if (file.size > this.MAX_FILE_SIZE_BYTES) {
+      alert(`File too large. Maximum size: ${this.MAX_FILE_SIZE_MB}MB`);
+      input.value = '';
+      return;
+    }
+
+    this.attachedFiles.push(file);
+    input.value = ''; // Reset to allow re-selecting same file
+  }
+
+  removeFile(index: number) {
+    this.attachedFiles.splice(index, 1);
+  }
+
+  formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 }
