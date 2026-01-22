@@ -215,7 +215,13 @@ export class MainSearchComponent implements AfterViewChecked {
 
     // Pass 2: Remove duplicate filename that appears before the markdown link
     // Pattern: "filename [filename](path)" -> "[filename](path)"
-    result = result.replace(/([^\[\]]+?)\s+\[\1\]\(/g, '[$1](');
+    result = result.replace(/([^\[\]]+?)\s+\[([^\]]+)\]\(/g, (match, before, inBrackets) => {
+      // Only remove the leading text if it matches the text inside the brackets
+      if (before.trim() === inBrackets.trim()) {
+        return `[${inBrackets}](`;
+      }
+      return match;
+    });
 
     // Pass 3: Convert standard markdown local paths to SharePoint URLs
     result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, localPath) => {
