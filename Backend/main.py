@@ -148,47 +148,58 @@ def delete_chat(session_id):
 
 @app.route('/query', methods=["POST"])
 @jwt_optional
-def run_query()->Dict:
+def run_query():
     start_time = time.perf_counter()
-    logger.info("Running Query...")
-
-    # Get data from JSON body
-    data = request.json
-    user_query = data.get("query")
-    session_id = data.get("session_id")
-
-    if not user_query:
-        logger.error("No query found")
-        return {"error": "Missing 'query' field in JSON body"}, 400
-
-    logger.info(f"Running query: {user_query}")
-    
-    # If session_id is provided and user is logged in, save user message
-    if session_id and g.user_id:
-        add_chat_message(session_id, 'user', user_query)
+    logger.info("=== Incoming Query Request ===")
 
     try:
+        # Get data from JSON body
+        data = request.json
+        if not data:
+            logger.error("No JSON data received")
+            return jsonify({"error": "No JSON body found"}), 400
+
+        user_query = data.get("query")
+        session_id = data.get("session_id")
+
+        if not user_query:
+            logger.error("No query found in payload")
+            return jsonify({"error": "Missing 'query' field"}), 400
+
+        logger.info(f"Query: {user_query}")
+        logger.info(f"Session: {session_id}, User: {getattr(g, 'user_id', 'Guest')}")
+
+        # If session_id is provided and user is logged in, save user message
+        if session_id and getattr(g, 'user_id', None):
+            try:
+                add_chat_message(session_id, 'user', user_query)
+            except Exception as e:
+                logger.warning(f"Failed to save user message: {e}")
+
+        # Initialize Agent and Pipeline
+        logger.info("Initializing AgentManager...")
         manager = AgentManager(query=user_query)
+        
+        logger.info("Executing Pipeline...")
         results = manager.pipeline()
 
-        logger.info("============QUERY RESULTS==========")
-        logger.info(results)
-        logger.info("====================================")
-        
+        logger.info("Synthesis complete. Formatting response...")
         duration = time.perf_counter() - start_time
-        logger.info(f"This task took {duration:.2f} seconds")
-        
         response_text = str(results)
         
         # If session_id is provided and user is logged in, save assistant message
-        if session_id and g.user_id:
-            add_chat_message(session_id, 'assistant', response_text, round(duration, 2))
+        if session_id and getattr(g, 'user_id', None):
+            try:
+                add_chat_message(session_id, 'assistant', response_text, round(duration, 2))
+            except Exception as e:
+                logger.warning(f"Failed to save assistant message: {e}")
 
-        return {"Results": response_text, "execution_time": round(duration, 2)}
+        logger.info(f"Query handled successfully in {duration:.2f}s")
+        return jsonify({"Results": response_text, "execution_time": round(duration, 2)})
 
     except Exception as e:
-        logger.error(f"Couldn't run the query: {str(e)}")
-        return {"Error": str(e)}, 500
+        logger.exception("FATAL ERROR in /query endpoint")
+        return jsonify({"error": str(e)}), 500
 
 # ============== FILE UPLOAD ENDPOINT ==============
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
@@ -269,5 +280,5 @@ def get_upload_limits():
 if __name__ == "__main__":
     logger.info("App starting...")
     
-    app.run(host="0.0.0.0", port=8000)
+    app.run(host="0.0.0.0", port=8000, threaded=True)
     

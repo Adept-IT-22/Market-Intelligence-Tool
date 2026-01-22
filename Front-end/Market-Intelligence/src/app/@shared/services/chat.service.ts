@@ -1,6 +1,6 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, signal, effect } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { environment } from '@environments/environment';
+import { environment } from '../../../environments/environment';
 import { AuthService } from './auth.service';
 import { tap, map, of } from 'rxjs';
 
@@ -23,10 +23,39 @@ export interface ChatMessage {
     providedIn: 'root'
 })
 export class ChatService {
+    private readonly SESSION_KEY = 'mit_current_session_id';
+
     sessions = signal<ChatSession[]>([]);
     currentSessionId = signal<number | null>(null);
 
-    constructor(private http: HttpClient, private auth: AuthService) { }
+    constructor(private http: HttpClient, private auth: AuthService) {
+        // Restore current session from storage if it exists
+        const savedSession = localStorage.getItem(this.SESSION_KEY);
+        if (savedSession) {
+            this.currentSessionId.set(parseInt(savedSession, 10));
+        }
+
+        // Automatically load sessions when user becomes authenticated
+        effect(() => {
+            if (this.auth.isAuthenticated()) {
+                this.loadSessions().subscribe();
+            } else {
+                this.sessions.set([]);
+                this.currentSessionId.set(null);
+                localStorage.removeItem(this.SESSION_KEY);
+            }
+        });
+
+        // Persist current session ID when it changes
+        effect(() => {
+            const id = this.currentSessionId();
+            if (id) {
+                localStorage.setItem(this.SESSION_KEY, id.toString());
+            } else if (this.auth.isAuthenticated()) {
+                localStorage.removeItem(this.SESSION_KEY);
+            }
+        });
+    }
 
     private getHeaders() {
         return {
@@ -49,15 +78,18 @@ export class ChatService {
         if (!this.auth.isAuthenticated()) {
             // For guests, we don't save to backend
             this.currentSessionId.set(null);
-            return of({ session_id: null });
+            return of({ session_id: null as number | null });
         }
 
         return this.http.post<{ session_id: number }>(`${environment.apiUrl}/chats`, { title }, {
             headers: this.getHeaders()
         }).pipe(
+            map(res => ({ session_id: res.session_id as number | null })),
             tap(res => {
-                this.currentSessionId.set(res.session_id);
-                this.loadSessions().subscribe();
+                if (res.session_id !== null) {
+                    this.currentSessionId.set(res.session_id);
+                    this.loadSessions().subscribe();
+                }
             })
         );
     }
