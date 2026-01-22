@@ -82,9 +82,8 @@ python setup_qdrant.py
 
 ## 🌓 Architectural Decisions
 
-- **SSR to Static Mode**: The frontend was recently switched from `outputMode: "server"` to `outputMode: "static"` to resolve local platform boot errors (`NG0401`). This ensures stability in local development environments while maintaining full RAG functionality.
-- **Traceable Citations**: AI responses now use mandatory `[Filename](URI)` markdown citations. The frontend's markdown sanitizer is configured to `SecurityContext.NONE` to allow functional `file:///` links to local documents.
-
+- **SSR to Static Mode**: The frontend was recently switched from `outputMode: "server"` to `outputMode: "static"` to resolve local platform boot errors (`NG0401`), improving stability in local development environments while preserving full RAG functionality.
+- **Traceable Citations**: AI responses now use mandatory `[Filename](URI)` markdown citations. For **local development only**, the frontend's markdown sanitizer is configured to `SecurityContext.NONE` to allow functional `file:///` links to local documents. **Warning:** `SecurityContext.NONE` disables Angular's built-in XSS protection for this content and **must not** be used in production or with untrusted input.
 ---
 
 ## 🌓 Dark/Light Mode
