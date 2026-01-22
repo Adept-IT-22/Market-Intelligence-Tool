@@ -6,6 +6,9 @@ import { MatIconModule } from '@angular/material/icon';
 import { MarkdownModule } from 'ngx-markdown';
 import { environment } from '../../../../environments/environment';
 import { gsap } from 'gsap';
+import { ChatService, ChatMessage as ServiceChatMessage } from '../../services/chat.service';
+import { AuthService } from '../../services/auth.service';
+import { effect } from '@angular/core';
 
 interface ChatMessage {
   content: string;
@@ -45,6 +48,9 @@ export class MainSearchComponent implements AfterViewChecked {
   threads: ChatThread[] = [];
   attachedFiles: File[] = [];
 
+  // Cache to store threads for active/recent sessions
+  private threadCache = new Map<number, ChatThread[]>();
+
   // Upload limits
   readonly MAX_FILE_SIZE_MB = 10;
   readonly MAX_FILE_SIZE_BYTES = this.MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -58,7 +64,30 @@ export class MainSearchComponent implements AfterViewChecked {
     "Synthesizing insights..."
   ];
 
-  constructor(private http: HttpClient) { }
+  constructor(
+    private http: HttpClient,
+    public chatService: ChatService,
+    private auth: AuthService
+  ) {
+    // React to session changes
+    effect(() => {
+      const sessionId = this.chatService.currentSessionId();
+      if (sessionId) {
+        // Save current threads to cache before switching if there's an active session
+        // Note: The previous sessionId is not easily available in effect without extra state
+        // and we usually update the cache whenever threads change anyway.
+
+        if (this.threadCache.has(sessionId)) {
+          this.threads = this.threadCache.get(sessionId)!;
+          setTimeout(() => this.scrollToBottom(), 100);
+        } else {
+          this.loadSessionHistory(sessionId);
+        }
+      } else {
+        this.threads = [];
+      }
+    });
+  }
 
   get isLoading(): boolean {
     return this.threads?.some(t => t.isLoading) ?? false;
@@ -81,10 +110,29 @@ export class MainSearchComponent implements AfterViewChecked {
   sendQuery() {
     if (!this.query.trim() && this.attachedFiles.length === 0) return;
 
-    // 1. Create New Thread
+    // 1. If no session exists but authenticated, create one first or use guest mode
+    if (!this.chatService.currentSessionId() && this.auth.isAuthenticated()) {
+      const initialQuery = this.query;
+      const initialFiles = [...this.attachedFiles];
+
+      this.chatService.createSession(initialQuery.substring(0, 50) || 'New Chat').subscribe(res => {
+        // Continue with the newly created session
+        this.processNewQuery(initialQuery, initialFiles);
+      });
+      this.query = '';
+      this.attachedFiles = [];
+      return;
+    }
+
+    this.processNewQuery(this.query, this.attachedFiles);
+    this.query = '';
+    this.attachedFiles = [];
+  }
+
+  private processNewQuery(queryText: string, files: File[]) {
     const newThread: ChatThread = {
       userMessage: {
-        content: this.query || `[Uploaded ${this.attachedFiles.length} file(s)]`,
+        content: queryText || `[Uploaded ${files.length} file(s)]`,
         timestamp: new Date()
       },
       isLoading: true,
@@ -94,25 +142,22 @@ export class MainSearchComponent implements AfterViewChecked {
 
     this.threads.push(newThread);
 
-    // Save context
-    const distinctQuery = this.query;
-    const filesToUpload = [...this.attachedFiles];
-    this.query = '';
-    this.attachedFiles = [];
-
-    // Reset file input
+    // Reset UI
     if (this.fileInput) {
       this.fileInput.nativeElement.value = '';
     }
 
-    // 2. Start Loading Cycle for this specific thread
     this.cycleLoadingSteps(newThread);
 
-    // 3. Upload files first if any
-    if (filesToUpload.length > 0) {
-      this.uploadFilesAndQuery(newThread, distinctQuery, filesToUpload);
+    const sessionId = this.chatService.currentSessionId();
+    if (sessionId) {
+      this.threadCache.set(sessionId, this.threads);
+    }
+
+    if (files.length > 0) {
+      this.uploadFilesAndQuery(newThread, queryText, files);
     } else {
-      this.executeQuery(newThread, distinctQuery);
+      this.executeQuery(newThread, queryText);
     }
   }
 
@@ -148,8 +193,15 @@ export class MainSearchComponent implements AfterViewChecked {
   }
 
   private executeQuery(thread: ChatThread, query: string) {
-    const payload = { query };
-    this.http.post(`${environment.apiUrl}/query`, payload).subscribe({
+    const sessionId = this.chatService.currentSessionId();
+    const payload = {
+      query,
+      session_id: sessionId
+    };
+
+    this.http.post(`${environment.apiUrl}/query`, payload, {
+      headers: { 'Authorization': `Bearer ${this.auth.getToken()}` }
+    }).subscribe({
       next: (res: any) => {
         thread.isLoading = false;
         thread.isTyping = true;
@@ -160,8 +212,18 @@ export class MainSearchComponent implements AfterViewChecked {
           timestamp: new Date()
         };
 
-        // Trigger GSAP Typewriter
         this.typewriteResponse(thread, res.Results);
+
+        // Auto-rename chat if it's the first message and title is "New Chat"
+        if (sessionId && this.threads.length === 1) {
+          const currentSessions = this.chatService.sessions();
+          const session = currentSessions.find(s => s.id === sessionId);
+          if (session && session.title === 'New Chat') {
+            // Use a short summary of the result or the query as name
+            const newTitle = query.length > 30 ? query.substring(0, 30) + '...' : query;
+            this.chatService.renameChat(sessionId, newTitle).subscribe();
+          }
+        }
       },
       error: (err) => {
         console.error('Error fetching data', err);
@@ -171,6 +233,42 @@ export class MainSearchComponent implements AfterViewChecked {
           timestamp: new Date()
         };
       }
+    });
+
+    // Update cache because threads array reference might change or items might be added
+    if (sessionId) {
+      this.threadCache.set(sessionId, this.threads);
+    }
+  }
+
+  private loadSessionHistory(sessionId: number) {
+    this.chatService.getChatDetails(sessionId).subscribe(res => {
+      const historyThreads: ChatThread[] = [];
+
+      // Group API messages into user/assistant pairs for the UI
+      for (let i = 0; i < res.messages.length; i++) {
+        const msg = res.messages[i];
+        if (msg.role === 'user') {
+          const nextMsg = res.messages[i + 1];
+          historyThreads.push({
+            userMessage: {
+              content: msg.content,
+              timestamp: new Date(msg.created_at || Date.now())
+            },
+            aiMessage: nextMsg?.role === 'assistant' ? {
+              content: nextMsg.content,
+              timestamp: new Date(nextMsg.created_at || Date.now())
+            } : undefined,
+            executionTime: nextMsg?.execution_time,
+            isLoading: false,
+            isTyping: false
+          });
+          if (nextMsg?.role === 'assistant') i++;
+        }
+      }
+      this.threads = historyThreads;
+      this.threadCache.set(sessionId, historyThreads);
+      setTimeout(() => this.scrollToBottom(), 100);
     });
   }
 
@@ -234,26 +332,76 @@ export class MainSearchComponent implements AfterViewChecked {
   }
 
   private typewriteResponse(thread: ChatThread, fullText: string) {
+    const transformedText = this.transformReferences(fullText);
     const proxy = { value: 0 };
-    const duration = Math.min(fullText.length * 0.005, 10);
+    const duration = Math.min(transformedText.length * 0.005, 10);
 
     gsap.to(proxy, {
-      value: fullText.length,
+      value: transformedText.length,
       duration: duration,
       ease: "none",
       onUpdate: () => {
         const charIndex = Math.floor(proxy.value);
         if (thread.aiMessage) {
-          thread.aiMessage.content = fullText.substring(0, charIndex);
+          thread.aiMessage.content = transformedText.substring(0, charIndex);
         }
       },
       onComplete: () => {
         if (thread.aiMessage) {
-          thread.aiMessage.content = fullText;
+          thread.aiMessage.content = transformedText;
         }
         thread.isTyping = false;
       }
     });
+  }
+
+  /**
+   * Transforms file references to SharePoint URLs.
+   */
+  private transformReferences(text: string): string {
+    const sharepointBase = 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents';
+    const localBasePath = 'C:\\Users\\imain\\Adept Technologies Ltd\\30. Cloud & Business Automation - Documents';
+    const localBasePathAlt = 'C:/Users/imain/Adept Technologies Ltd/30. Cloud & Business Automation - Documents';
+
+    const toSharePointUrl = (localPath: string): string => {
+      let relativePath = localPath
+        .replace(localBasePath, '')
+        .replace(localBasePathAlt, '')
+        .replace(/\\/g, '/')
+        .replace(/^\//, '');
+
+      const encodedPath = relativePath
+        .split('/')
+        .map((segment: string) => encodeURIComponent(segment))
+        .join('/');
+
+      return `${sharepointBase}/${encodedPath}`;
+    };
+
+    let result = text;
+
+    // Handle [Source: filename | Link: path]
+    result = result.replace(/\[Source:\s*([^\|]+)\s*\|\s*Link:\s*([^\]]+)\]/g, (match, filename, localPath) => {
+      const trimmedFilename = filename.trim();
+      const trimmedPath = localPath.trim();
+      if (trimmedPath.includes('\\') || trimmedPath.startsWith('C:')) {
+        return `[${trimmedFilename}](${toSharePointUrl(trimmedPath)})`;
+      }
+      return `[${trimmedFilename}](${trimmedPath})`;
+    });
+
+    // Remove duplicate filename "filename [filename](path)"
+    result = result.replace(/([^\[\]]+?)\s+\[\1\]\(/g, '[$1](');
+
+    // Standard markdown link [filename](local_path)
+    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, localPath) => {
+      if (localPath.includes('\\') || localPath.startsWith('C:')) {
+        return `[${filename}](${toSharePointUrl(localPath)})`;
+      }
+      return match;
+    });
+
+    return result;
   }
 
   // ============ FILE HANDLING ============
