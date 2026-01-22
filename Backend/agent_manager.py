@@ -9,6 +9,8 @@ from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 import logging
 import json
+import re
+from urllib.parse import urlparse
 
 load_dotenv()
 
@@ -24,7 +26,7 @@ QDRANT_URL = os.getenv("QDRANT_URL")
 # Project Paths
 current_directory = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_directory)
-DATABASE_PATH = os.path.join(project_root, "DB", "market-intelligence.db")
+DATABASE_PATH = os.getenv("DATABASE_PATH")
 
 # Models
 LLM_MODEL_NAME = "llama-3.1-8b-instant"
@@ -82,6 +84,28 @@ class AgentManager:
             logger.error(f"Qdrant search failed: {e}")
             return []
 
+    def _get_display_name(self, uri: str) -> str:
+        """Helper to extract a clean filename or domain/last segment from a URI or Path."""
+        if not uri or uri == "Unknown":
+            return "Unknown"
+        
+        # Handle URLs
+        if uri.startswith(('http://', 'https://')):
+            try:
+                parsed = urlparse(uri)
+                # If there's a path beyond '/', get the last segment
+                path_segments = [s for s in parsed.path.split('/') if s]
+                if path_segments:
+                    return path_segments[-1]
+                # Fallback to domain
+                return parsed.netloc
+            except Exception as e:
+                logger.warning(f"Failed to parse URI '{uri}': {e}")
+                return uri
+        
+        # Handle File Paths
+        return os.path.basename(uri)
+
     def get_table_schema(self, table_name):
         conn = sqlite3.connect(self.database_path)
         cursor = conn.cursor()
@@ -93,30 +117,57 @@ class AgentManager:
     def get_master_routing(self):
         """
         Level 1: Query Master table to find relevant Routing Tables.
+        Optimized: Pre-filters using semantic search to avoid context overflow.
         """
-        logger.info("Level 1: Master Table Routing...")
+        logger.info("Level 1: Master Table Routing (Optimized)...")
         
+        # 1. Semantic Pre-search to find candidate tables
+        # We search the main collection to see which documents are semantically relevant
+        pre_search_results = self.search_qdrant(top_k=10)
+        candidate_routing_tables = set()
+        for point in pre_search_results:
+            payload = point.payload or {}
+            rt = payload.get("routing_table")
+            if rt:
+                candidate_routing_tables.add(rt)
+        
+        if not candidate_routing_tables:
+            logger.warning("No candidate routing tables found via semantic search.")
+            return []
+
+        # 2. Fetch only the relevant Master entries
         conn = sqlite3.connect(self.database_path)
-        df_master = pd.read_sql_query("SELECT id, Title, Source, Summary, Datatype, Sectors, table_name FROM Master", conn)
+        # Validate that candidate table names are safe to include in the query
+        safe_candidates = [t for t in candidate_routing_tables if re.match(r'^[a-z0-9_]+$', t)]
+        
+        if not safe_candidates:
+            logger.warning("No safe candidate routing tables after validation.")
+            conn.close()
+            return []
+
+        placeholders = ', '.join(['?'] * len(safe_candidates))
+        query = f"SELECT id, Title, Source, Summary, Datatype, Sectors, table_name FROM Master WHERE table_name IN ({placeholders})"
+        df_master = pd.read_sql_query(query, conn, params=safe_candidates)
         conn.close()
         
         if df_master.empty:
-            logger.warning("Master table is empty.")
-            return []
+            logger.warning("No matching Master entries for candidates in database." \
+            "semantic_candidates = %d, safe_candidates = %d", len(candidate_routing_tables), len(safe_candidates))
+            return [] # Returning empty list instead of unverified candidates as per best practice
 
         master_context = df_master.to_string(index=False)
 
         system_prompt = (
             "You are a Data Architect. Your goal is to select relevant 'Routing Tables' from the Master Menu. "
-            "Analyze the User Query and the Master Table. "
-            "Return a comma-separated list of 'table_name' that are most relevant. "
+            "Analyze the User Query and the filtered Master Table. "
+            "Return a comma-separated list of 'table_name' that are most relevant to answering the query. "
             "If nothing is relevant, return nothing."
         )
 
         user_prompt = f"""
         User Query: "{self.query}"
         
-        --- Master Table (Menu) ---
+        --- Filtered Master Table (Candidates) ---
         {master_context}
         
         Output Format: table_name1, table_name2
@@ -200,19 +251,6 @@ class AgentManager:
             "Return a JSON object with two keys: 'sql_tables' (list of strings) and 'qdrant_ids' (list of strings)."
         )
         
-        # Format Qdrant Context
-        qdrant_context = ""
-        for point in qdrant_results:
-            payload = point.payload or {}
-            summary = payload.get("summary") or payload.get("content", "")
-            qdrant_context += f"- {summary[:500]}\n"
-
-
-        # Format SQL Context (Limit length)
-        sql_context = ""
-        for table, data in detail_tables.items():
-            sql_context += f"\nTable: {table}\nData (Sample):\n{str(data)[:2000]}\n"
-
         user_prompt = f"""
         User Query: "{self.query}"
         
@@ -263,8 +301,27 @@ class AgentManager:
                      continue
 
                 try:
+                    # Robust extraction of master_id from table name (expected: detail_<master_id>_<suffix>)
+                    master_id = None
+                    if table.startswith("detail_"):
+                        parts = table.split("_", 2)
+                        if len(parts) >= 3 and parts[1]:
+                            master_id = parts[1]
+                    
+                    if not master_id:
+                        logger.warning(f"Table name '{table}' does not match expected 'detail_<master_id>_<suffix>' pattern.")
+
+                    source_link = "Unknown Source"
+                    if master_id:
+                        cur = conn.cursor()
+                        cur.execute("SELECT Source FROM Master WHERE id = ?", (master_id,))
+                        row = cur.fetchone()
+                        if row:
+                            source_link = row[0]
+
+                    source_name = self._get_display_name(source_link)
                     df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                    context += f"\n### Data Table: {table}\n{df.to_string(index=False)}\n"
+                    context += f"\n---\nSource: {source_name}\nLink: {source_link}\nTable Data:\n{df.to_string(index=False)}\n"
                 except Exception as e:
                     logger.error(f"Error reading Detail SQL {table}: {e}")
             conn.close()
@@ -273,8 +330,9 @@ class AgentManager:
         qdrant_ids = selection.get('qdrant_ids', [])
         if qdrant_ids:
             try:
-                # Validate IDs briefly (UUID check or length)
-                safe_ids = [qid for qid in qdrant_ids if len(qid) > 10] # basic check
+                # Stronger UUID validation: 8-4-4-4-12 hex digits
+                uuid_regex = re.compile(r'^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$', re.IGNORECASE)
+                safe_ids = [qid for qid in qdrant_ids if uuid_regex.match(str(qid))]
                 
                 if safe_ids:
                     points = self.qdrant_client.retrieve(
@@ -283,10 +341,10 @@ class AgentManager:
                     )
                     for point in points:
                         payload = point.payload
-                        # Assuming payload has 'text' or we construct it
                         text_content = payload.get('text') or str(payload)
-                        source = payload.get('source', 'Unknown')
-                        context += f"\n### Text Source: {source}\n{text_content}\n"
+                        source_link = payload.get('source', 'Unknown')
+                        source_name = self._get_display_name(source_link)
+                        context += f"\n---\nSource: {source_name}\nLink: {source_link}\nContent:\n{text_content}\n"
             except Exception as e:
                 logger.error(f"Error retrieving Qdrant points: {e}")
                 
@@ -311,7 +369,9 @@ class AgentManager:
         for point in semantic_results:
              payload = point.payload
              text = payload.get('text', str(payload))
-             semantic_context += f"- [Semantic Match]: {text}\n"
+             source_link = payload.get('source', 'Unknown')
+             source_name = self._get_display_name(source_link)
+             semantic_context += f"- [Source: {source_name} | Link: {source_link}]: {text}\n"
 
         # Final Synthesis
         return self.get_final_response(semantic_results, {"Hierarchical Data": detail_context, "Semantic Data": semantic_context})
@@ -329,17 +389,26 @@ class AgentManager:
             for point in search_results:
                 payload = getattr(point, "payload", {})
                 text = payload.get('text', str(payload))
-                semantic_lines.append(f"- [Semantic Match]: {text}")
+                source_link = payload.get('source', 'Unknown')
+                source_name = self._get_display_name(source_link)
+                semantic_lines.append(f"- [Source: {source_name} | Link: {source_link}]: {text}")
             semantic_data = "\n".join(semantic_lines)
             
         if semantic_data is None: semantic_data = ""
         
         system_prompt = (
-            "You are an expert Market Intelligence Analyst for Kenya. "
-            "Synthesize the provided data to answer the User Query. "
-            "The data comes from a Deep Drill-Down (Hierarchical) and a Broad Sweep (Semantic). "
-            "Prioritize the specific tabular data found in the Drill-Down. "
-            "Cite your sources precisely."
+            "You are an expert Market Intelligence Analyst for Adept Technologies Ltd. "
+            "Synthesize the provided data to answer the User Query accurately. "
+            "IMPORTANT CITATION RULES:\n"
+            "1. You MUST cite your sources using Markdown hyperlinks: [Filename](URI).\n"
+            "2. The visible text between brackets MUST ONLY be the filename (e.g., 'Report.pdf').\n"
+            "3. The URI inside the parentheses MUST be the full 'URI' or 'Link' provided in the context.\n"
+            "4. DO NOT include the full path or 'Semantic Match' or 'Text Source' in the visible text.\n"
+            "5. List all unique references at the very end in a 'References' section using the same [Filename](URI) format.\n"
+            "\nExample Response:\n"
+            "The project started in 2023 [ProjectPlan.docx](file:///...). For more details, see the [Reference Section].\n"
+            "\nReferences:\n"
+            "1. [ProjectPlan.docx](file:///...)"
         )
         
         user_prompt = f"""
@@ -351,7 +420,7 @@ class AgentManager:
         === Semantic Search Context (Broad Context) ===
         {semantic_data}
         
-        Provide a detailed, Markdown-formatted answer.
+        Provide a detailed, Markdown-formatted answer with inline citations and a references list at the end.
         """
         
         try:
@@ -367,3 +436,4 @@ class AgentManager:
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
             return "I encountered an error generating the final response."
+

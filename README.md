@@ -80,15 +80,10 @@ python setup_qdrant.py
 
 ---
 
-## 📐 Architecture
+## 🌓 Architectural Decisions
 
-1. **Query Ingestion**: User enters a natural language query via the Angular chat interface.
-2. **Context Retrieval**:
-    - **Vector Search**: Search Qdrant for semantic matches in the knowledge base.
-    - **Relational Search**: Query SQLite for structured data based on identified table schemas.
-3. **Synthesis**: The Backend sends the consolidated context to Groq's Llama-3 model.
-4. **Response**: A markdown-formatted, data-cited response is streamed back to the frontend.
-
+- **SSR to Static Mode**: The frontend was recently switched from `outputMode: "server"` to `outputMode: "static"` to resolve local platform boot errors (`NG0401`), improving stability in local development environments while preserving full RAG functionality.
+- **Traceable Citations**: AI responses now use mandatory `[Filename](URI)` markdown citations. For **local development only**, the frontend's markdown sanitizer is configured to `SecurityContext.NONE` to allow functional `file:///` links to local documents. **Warning:** `SecurityContext.NONE` disables Angular's built-in XSS protection for this content and **must not** be used in production or with untrusted input.
 ---
 
 ## 🌓 Dark/Light Mode
