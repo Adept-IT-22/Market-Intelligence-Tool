@@ -5,14 +5,18 @@ from qdrant_client.models import PointStruct, VectorParams, Distance
 import os
 import logging
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
 EMBEDDING_MODEL = "BAAI/bge-small-en"
-QDRANT_HOST = "localhost"
-QDRANT_PORT = 7000
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
 COLLECTION_NAME = "adept_database"
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../DB/market-intelligence.db")
 

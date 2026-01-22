@@ -40,7 +40,7 @@ def migrate_db():
                 Datatype TEXT,
                 Sectors TEXT,
                 table_name TEXT, 
-                Date TEXT
+                month_created TEXT
             )
         """)
         
@@ -92,7 +92,7 @@ def migrate_db():
                         datatype = "File"
 
                         cursor.execute("""
-                            INSERT INTO Master (Title, Source, Summary, Datatype, Sectors, table_name, Date)
+                            INSERT INTO Master (Title, Source, Summary, Datatype, Sectors, table_name, month_created)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
                         """, (old_title, old_table_name, old_summary, datatype, old_sectors, old_table_name, old_date))
                         
