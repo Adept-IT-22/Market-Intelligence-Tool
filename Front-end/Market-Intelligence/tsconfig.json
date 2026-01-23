@@ -18,6 +18,12 @@
     "esModuleInterop": true,
     "experimentalDecorators": true,
     "moduleResolution": "bundler",
+    "baseUrl": "./",
+    "paths": {
+      "@environments/*": [
+        "src/environments/*"
+      ]
+    },
     "importHelpers": true,
     "target": "ES2022",
     "module": "ES2022"

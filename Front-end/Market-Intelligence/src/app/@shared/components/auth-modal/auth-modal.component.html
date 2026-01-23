@@ -1,0 +1,48 @@
+<div class="auth-modal-container">
+    <div class="modal-header">
+        <h2>{{ mode() === 'login' ? 'Welcome Back' : 'Create Account' }}</h2>
+        <p class="subtitle">{{ mode() === 'login' ? 'Sign in to access your chat history' : 'Join us to persist your research' }}</p>
+        <button class="close-btn" (click)="close()">
+            <mat-icon>close</mat-icon>
+        </button>
+    </div>
+
+    <form [formGroup]="authForm" (ngSubmit)="onSubmit()" class="auth-form">
+        <mat-form-field appearance="outline" subscriptSizing="dynamic">
+            <mat-label>Email Address</mat-label>
+            <input matInput formControlName="email" type="email" placeholder="name@example.com">
+            <mat-icon matSuffix>email</mat-icon>
+        </mat-form-field>
+
+        <mat-form-field *ngIf="mode() === 'signup'" appearance="outline" subscriptSizing="dynamic">
+            <mat-label>Display Name</mat-label>
+            <input matInput formControlName="displayName" placeholder="John Doe">
+            <mat-icon matSuffix>person</mat-icon>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" subscriptSizing="dynamic">
+            <mat-label>Password</mat-label>
+            <input matInput formControlName="password" type="password" placeholder="Min. 6 characters">
+            <mat-icon matSuffix>lock</mat-icon>
+        </mat-form-field>
+
+        <div class="error-msg" *ngIf="errorMessage()">
+            <mat-icon>error_outline</mat-icon>
+            <span>{{ errorMessage() }}</span>
+        </div>
+
+        <button mat-flat-button color="primary" class="submit-btn" [disabled]="authForm.invalid || isLoading()">
+            <span *ngIf="!isLoading()">{{ mode() === 'login' ? 'Sign In' : 'Sign Up' }}</span>
+            <span *ngIf="isLoading()">Processing...</span>
+        </button>
+    </form>
+
+    <div class="modal-footer">
+        <p>
+            {{ mode() === 'login' ? "Don't have an account?" : "Already have an account?" }}
+            <button class="link-btn" (click)="switchMode()">
+                {{ mode() === 'login' ? 'Sign Up' : 'Sign In' }}
+            </button>
+        </p>
+    </div>
+</div>

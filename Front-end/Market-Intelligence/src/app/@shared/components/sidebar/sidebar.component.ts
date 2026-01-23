@@ -1,22 +1,79 @@
-import { NgClass, NgFor, NgIf } from '@angular/common';
-import { Component } from '@angular/core';
+import { NgClass, NgFor, NgIf, DatePipe } from '@angular/common';
+import { Component, OnInit, signal, ViewChild, ElementRef } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { AuthService } from '../../services/auth.service';
+import { ChatService, ChatSession } from '../../services/chat.service';
+import { MatMenuModule } from '@angular/material/menu';
+import { FormsModule } from '@angular/forms';
+
+import { UiService } from '../../services/ui.service';
 
 @Component({
   selector: 'app-sidebar',
-  imports: [MatIconModule, NgFor, NgClass, RouterLink, RouterLinkActive, NgIf],
+  imports: [MatIconModule, NgFor, NgClass, NgIf, MatMenuModule, FormsModule, DatePipe],
   templateUrl: './sidebar.component.html',
   styleUrl: './sidebar.component.scss'
 })
-export class SidebarComponent {
-  menuItems = [
-    { "name": "Start New Chat", "icon": "add_comment", "route": "/" }
-  ]
+export class SidebarComponent implements OnInit {
+  editingSessionId = signal<number | null>(null);
+  editTitle = '';
 
-  isExpanded: boolean = true;
+  @ViewChild('editInput') set editInput(element: ElementRef<HTMLInputElement>) {
+    if (element) {
+      element.nativeElement.focus();
+      element.nativeElement.select();
+    }
+  }
+
+  constructor(
+    public auth: AuthService,
+    public chatService: ChatService,
+    public uiService: UiService
+  ) { }
+
+  ngOnInit() {
+    // Sessions are now loaded automatically by ChatService when authenticated
+  }
 
   toggleSidebar() {
-    this.isExpanded = !this.isExpanded;
+    this.uiService.toggleSidebar();
+  }
+
+  createNewChat() {
+    this.chatService.createSession().subscribe(() => {
+      // Handle UI update if needed, but signal should handle it
+    });
+  }
+
+  selectChat(session: ChatSession) {
+    // Only select if not editing
+    if (this.editingSessionId() !== session.id) {
+      this.chatService.getChatDetails(session.id).subscribe();
+    }
+  }
+
+  startEditing(session: ChatSession, event: Event) {
+    event.stopPropagation();
+    this.editingSessionId.set(session.id);
+    this.editTitle = session.title;
+  }
+
+  saveRename(session: ChatSession) {
+    const newTitle = this.editTitle.trim();
+    if (newTitle && newTitle !== session.title) {
+      this.chatService.renameChat(session.id, newTitle).subscribe();
+    }
+    this.editingSessionId.set(null);
+  }
+
+  cancelEditing() {
+    this.editingSessionId.set(null);
+  }
+
+  deleteChat(session: ChatSession, event: Event) {
+    event.stopPropagation();
+    if (confirm(`Are you sure you want to delete "${session.title}"?`)) {
+      this.chatService.deleteChat(session.id).subscribe();
+    }
   }
 }

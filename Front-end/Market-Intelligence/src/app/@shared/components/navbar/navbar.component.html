@@ -6,9 +6,49 @@
     </div>
 
     <div class="nav-items">
-        <button class="nav-link theme-toggle" (click)="toggleTheme()">
+        <button class="nav-link theme-toggle" (click)="toggleTheme()" title="Toggle Theme">
             <mat-icon>{{ themeService.isDarkMode() ? 'light_mode' : 'dark_mode' }}</mat-icon>
         </button>
-        <!-- <a routerLink="/" class="nav-link" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">Home</a> -->
+
+        <!-- Auth Section -->
+        <ng-container *ngIf="!auth.isAuthenticated(); else userMenu">
+            <button class="login-btn" (click)="openLogin()">
+                <mat-icon>login</mat-icon>
+                <span>Sign In</span>
+            </button>
+        </ng-container>
+
+        <ng-template #userMenu>
+            <button class="user-profile-btn" [matMenuTriggerFor]="profileMenu">
+                <div class="avatar" [style.background]="'var(--accent-gradient)'">
+                    {{ getUserInitial() }}
+                </div>
+                <mat-icon>expand_more</mat-icon>
+            </button>
+
+            <mat-menu #profileMenu="matMenu" class="modern-menu" xPosition="before">
+                <!-- Header: User Info -->
+                <div class="menu-header">
+                    <div class="header-avatar-wrapper">
+                        <div class="header-avatar" [style.background]="'var(--accent-gradient)'">
+                            {{ getUserInitial() }}
+                        </div>
+                        <div class="status-indicator"></div>
+                    </div>
+                    <div class="header-info">
+                        <p class="name">{{ getUserDisplayName() }}</p>
+                        <p class="email">{{ auth.currentUser()?.email }}</p>
+                    </div>
+                </div>
+
+                <!-- Footer: Functional Action -->
+                <div class="menu-footer">
+                    <button mat-menu-item (click)="logout()" class="logout-item">
+                        <mat-icon>logout</mat-icon>
+                        <span>Sign Out</span>
+                    </button>
+                </div>
+            </mat-menu>
+        </ng-template>
     </div>
 </nav>
