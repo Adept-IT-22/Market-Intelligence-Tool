@@ -1,4 +1,4 @@
-<div class="base-layout-component">
+<div class="base-layout-component" [ngClass]="{'sidebar-closed': !uiService.isSidebarExpanded()}">
     <div class="sidebar-container">
         <app-sidebar />
     </div>

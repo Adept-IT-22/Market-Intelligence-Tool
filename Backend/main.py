@@ -1,4 +1,4 @@
-from flask import Flask, request 
+from flask import Flask, request, g, jsonify
 from flask_cors import CORS
 import time
 import os
@@ -6,6 +6,13 @@ from dotenv import load_dotenv
 import logging
 from agent_manager import AgentManager
 from typing import Dict
+from models import (
+    init_chat_tables, create_user, get_user_by_email, get_user_by_id,
+    create_chat_session, get_user_chat_sessions, get_chat_session,
+    update_chat_session_title, delete_chat_session,
+    add_chat_message, get_chat_messages
+)
+from auth import hash_password, verify_password, create_token, jwt_required, jwt_optional
 
 #Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -13,6 +20,9 @@ logger = logging.getLogger()
 
 app = Flask(__name__)
 CORS(app)
+
+# Initialize chat tables
+init_chat_tables()
 
 #========QDRANT CONFIGS=========
 load_dotenv()
@@ -25,37 +35,175 @@ logger.info(f"Connecting to Qdrant at {qdrant_url}")
 
 #query="I'm a farmer in Limuru and want to explore selling my excess maize stock. How might I go about doing that and am i in the right location?")
 
-@app.route('/query', methods=["POST"])
-def run_query()->Dict:
-    start_time = time.perf_counter()
-    logger.info("Running Query...")
-
-    # Get data from JSON body
+@app.route('/auth/signup', methods=['POST'])
+def signup():
     data = request.json
-    user_query = data.get("query")
+    email = data.get('email')
+    password = data.get('password')
+    display_name = data.get('displayName')
 
-    if not user_query:
-        logger.error("No query found")
-        return {"error": "Missing 'query' field in JSON body"}, 400
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
 
-    logger.info(f"Running query: {user_query}")
+    if get_user_by_email(email):
+        return jsonify({'error': 'Email already registered'}), 409
+
+    hashed_pw = hash_password(password)
+    user_id = create_user(email, hashed_pw, display_name)
     
+    token = create_token(user_id, email)
+    return jsonify({
+        'token': token,
+        'user': {
+            'id': user_id,
+            'email': email,
+            'displayName': display_name
+        }
+    }), 201
+
+@app.route('/auth/login', methods=['POST'])
+def login():
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
+
+    user = get_user_by_email(email)
+    if not user or not verify_password(password, user['password_hash']):
+        return jsonify({'error': 'Invalid email or password'}), 401
+
+    token = create_token(user['id'], user['email'])
+    return jsonify({
+        'token': token,
+        'user': {
+            'id': user['id'],
+            'email': user['email'],
+            'displayName': user['display_name']
+        }
+    }), 200
+
+@app.route('/auth/me', methods=['GET'])
+@jwt_required
+def get_me():
+    user = get_user_by_id(g.user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify({'user': {
+        'id': user['id'],
+        'email': user['email'],
+        'displayName': user['display_name']
+    }}), 200
+
+# ============== CHAT HISTORY ENDPOINTS ==============
+
+@app.route('/chats', methods=['GET'])
+@jwt_required
+def list_chats():
+    sessions = get_user_chat_sessions(g.user_id)
+    return jsonify({'sessions': sessions}), 200
+
+@app.route('/chats', methods=['POST'])
+@jwt_required
+def create_chat():
+    data = request.json
+    title = data.get('title', 'New Chat')
+    session_id = create_chat_session(g.user_id, title)
+    return jsonify({'session_id': session_id}), 201
+
+@app.route('/chats/<int:session_id>', methods=['GET'])
+@jwt_required
+def get_chat(session_id):
+    session = get_chat_session(session_id, g.user_id)
+    if not session:
+        return jsonify({'error': 'Chat session not found'}), 404
+    
+    messages = get_chat_messages(session_id)
+    return jsonify({
+        'session': session,
+        'messages': messages
+    }), 200
+
+@app.route('/chats/<int:session_id>/rename', methods=['PUT'])
+@jwt_required
+def rename_chat(session_id):
+    data = request.json
+    title = data.get('title')
+    if not title:
+        return jsonify({'error': 'Title is required'}), 400
+    
+    success = update_chat_session_title(session_id, g.user_id, title)
+    if not success:
+        return jsonify({'error': 'Failed to rename chat or unauthorized'}), 404
+    
+    return jsonify({'success': True}), 200
+
+@app.route('/chats/<int:session_id>', methods=['DELETE'])
+@jwt_required
+def delete_chat(session_id):
+    success = delete_chat_session(session_id, g.user_id)
+    if not success:
+        return jsonify({'error': 'Failed to delete chat or unauthorized'}), 404
+    
+    return jsonify({'success': True}), 200
+
+# ============== QUERY ENDPOINT (UPDATED) ==============
+
+@app.route('/query', methods=["POST"])
+@jwt_optional
+def run_query():
+    start_time = time.perf_counter()
+    logger.info("=== Incoming Query Request ===")
+
     try:
+        # Get data from JSON body
+        data = request.json
+        if not data:
+            logger.error("No JSON data received")
+            return jsonify({"error": "No JSON body found"}), 400
+
+        user_query = data.get("query")
+        session_id = data.get("session_id")
+
+        if not user_query:
+            logger.error("No query found in payload")
+            return jsonify({"error": "Missing 'query' field"}), 400
+
+        logger.info(f"Query: {user_query}")
+        logger.info(f"Session: {session_id}, User: {getattr(g, 'user_id', 'Guest')}")
+
+        # If session_id is provided and user is logged in, save user message
+        if session_id and getattr(g, 'user_id', None):
+            try:
+                add_chat_message(session_id, 'user', user_query)
+            except Exception as e:
+                logger.warning(f"Failed to save user message: {e}")
+
+        # Initialize Agent and Pipeline
+        logger.info("Initializing AgentManager...")
         manager = AgentManager(query=user_query)
+        
+        logger.info("Executing Pipeline...")
         results = manager.pipeline()
 
-        logger.info("============QUERY RESULTS==========")
-        logger.info(results)
-        logger.info("====================================")
-        
+        logger.info("Synthesis complete. Formatting response...")
         duration = time.perf_counter() - start_time
-        logger.info(f"This task took {duration:.2f} seconds")
-        logger.info(f"Type of results['text'] is: {type(results)}")
-        return {"Results": str(results), "execution_time": round(duration, 2)}
+        response_text = str(results)
+        
+        # If session_id is provided and user is logged in, save assistant message
+        if session_id and getattr(g, 'user_id', None):
+            try:
+                add_chat_message(session_id, 'assistant', response_text, round(duration, 2))
+            except Exception as e:
+                logger.warning(f"Failed to save assistant message: {e}")
+
+        logger.info(f"Query handled successfully in {duration:.2f}s")
+        return jsonify({"Results": response_text, "execution_time": round(duration, 2)})
 
     except Exception as e:
-        logger.error(f"Couldn't run the query: {str(e)}")
-        return {"Error": str(e)}, 500
+        logger.exception("FATAL ERROR in /query endpoint")
+        return jsonify({"error": str(e)}), 500
 
 # ============== FILE UPLOAD ENDPOINT ==============
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
@@ -136,5 +284,5 @@ def get_upload_limits():
 if __name__ == "__main__":
     logger.info("App starting...")
     
-    app.run(host="0.0.0.0", port=8000)
+    app.run(host="0.0.0.0", port=8000, threaded=True)
     
