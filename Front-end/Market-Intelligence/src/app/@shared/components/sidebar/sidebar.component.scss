@@ -6,6 +6,8 @@
     transition: width var(--transition-base);
     width: var(--sidebar-width);
     overflow: hidden;
+    user-select: none;
+    /* Prevent text cursor/selection */
 
     &.closed {
         width: var(--sidebar-collapsed);
