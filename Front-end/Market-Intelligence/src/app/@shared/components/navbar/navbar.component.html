@@ -21,59 +21,32 @@
         <ng-template #userMenu>
             <button class="user-profile-btn" [matMenuTriggerFor]="profileMenu">
                 <div class="avatar" [style.background]="'var(--accent-gradient)'">
-                    {{ (auth.currentUser()?.displayName || auth.currentUser()?.email || 'U')[0].toUpperCase() }}
+                    {{ getUserInitial() }}
                 </div>
                 <mat-icon>expand_more</mat-icon>
             </button>
 
             <mat-menu #profileMenu="matMenu" class="modern-menu" xPosition="before">
+                <!-- Header: User Info -->
                 <div class="menu-header">
                     <div class="header-avatar-wrapper">
                         <div class="header-avatar" [style.background]="'var(--accent-gradient)'">
-                            {{ (auth.currentUser()?.displayName || auth.currentUser()?.email || 'U')[0].toUpperCase() }}
+                            {{ getUserInitial() }}
                         </div>
                         <div class="status-indicator"></div>
                     </div>
                     <div class="header-info">
-                        <div class="name-row">
-                            <p class="name">{{ auth.currentUser()?.displayName || 'Research User' }}</p>
-                            <span class="role-badge">Pro</span>
-                        </div>
+                        <p class="name">{{ getUserDisplayName() }}</p>
                         <p class="email">{{ auth.currentUser()?.email }}</p>
                     </div>
                 </div>
 
-                <div class="menu-sections">
-                    <div class="menu-section">
-                        <span class="section-title">Account</span>
-                        <button mat-menu-item>
-                            <mat-icon>person</mat-icon>
-                            <span>My Profile</span>
-                        </button>
-                        <button mat-menu-item>
-                            <mat-icon>settings</mat-icon>
-                            <span>Settings</span>
-                        </button>
-                    </div>
-
-                    <div class="menu-section">
-                        <span class="section-title">Resources</span>
-                        <button mat-menu-item>
-                            <mat-icon>auto_awesome</mat-icon>
-                            <span>Usage Statistics</span>
-                        </button>
-                        <button mat-menu-item>
-                            <mat-icon>help_center</mat-icon>
-                            <span>Help Center</span>
-                        </button>
-                    </div>
-
-                    <div class="menu-footer">
-                        <button mat-menu-item (click)="logout()" class="logout-item">
-                            <mat-icon>logout</mat-icon>
-                            <span>Sign Out</span>
-                        </button>
-                    </div>
+                <!-- Footer: Functional Action -->
+                <div class="menu-footer">
+                    <button mat-menu-item (click)="logout()" class="logout-item">
+                        <mat-icon>logout</mat-icon>
+                        <span>Sign Out</span>
+                    </button>
                 </div>
             </mat-menu>
         </ng-template>

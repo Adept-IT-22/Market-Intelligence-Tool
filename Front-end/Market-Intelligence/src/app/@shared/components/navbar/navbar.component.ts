@@ -38,4 +38,16 @@ export class NavbarComponent {
     this.auth.logout();
     window.location.reload(); // Refresh to clear states
   }
+
+  getUserDisplayName(): string {
+    const user = this.auth.currentUser();
+    if (user?.displayName) return user.displayName;
+    if (user?.email) return user.email.split('@')[0];
+    return 'Research User';
+  }
+
+  getUserInitial(): string {
+    const name = this.getUserDisplayName();
+    return (name[0] || 'U').toUpperCase();
+  }
 }
