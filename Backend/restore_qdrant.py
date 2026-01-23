@@ -26,27 +26,42 @@ def restore_snapshot():
         return
 
     try:
-        # Check if collection exists first
-        # We might want to recover TO this collection.
-        # The recover API usually takes a file upload or a URL.
-        # Direct file upload endpoint: POST /collections/{name}/snapshots/upload
-        
         logger.info(f"Restoring snapshot from {SNAPSHOT_PATH}...")
         
+        # Read the snapshot file
         with open(SNAPSHOT_PATH, 'rb') as f:
-            files = {'snapshot': f}
-            # Note: The endpoint /collections/{name}/snapshots/upload recovers the snapshot data 
-            # into the specified collection.
-            response = requests.post(
-                f"{base_url}/collections/{COLLECTION_NAME}/snapshots/upload",
-                files=files
-            )
+            snapshot_data = f.read()
+        
+        # Use the correct endpoint with priority parameter
+        # The snapshot upload endpoint requires the file as raw body or multipart
+        response = requests.post(
+            f"{base_url}/collections/{COLLECTION_NAME}/snapshots/upload",
+            params={"priority": "snapshot"},  # Use snapshot data over existing
+            files={"snapshot": ("market_intelligence_backup.snapshot", open(SNAPSHOT_PATH, 'rb'), "application/octet-stream")}
+        )
             
         if response.status_code == 200:
             logger.info("✅ Snapshot successfully uploaded and restored!")
+            logger.info(response.json())
         else:
             logger.error(f"Failed to restore: Status {response.status_code}")
             logger.error(response.text)
+            
+            # If collection doesn't exist, try creating it first
+            if response.status_code == 404:
+                logger.info("Collection doesn't exist. Trying to recover from snapshot...")
+                # Try the recover endpoint which creates the collection from snapshot
+                response = requests.put(
+                    f"{base_url}/collections/{COLLECTION_NAME}/snapshots/recover",
+                    json={
+                        "location": SNAPSHOT_PATH
+                    }
+                )
+                if response.status_code == 200:
+                    logger.info("✅ Collection recovered from snapshot!")
+                else:
+                    logger.error(f"Recovery failed: {response.status_code}")
+                    logger.error(response.text)
 
     except Exception as e:
         logger.error(f"Restore process failed: {e}")
