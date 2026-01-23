@@ -90,7 +90,11 @@ def get_me():
     user = get_user_by_id(g.user_id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
-    return jsonify({'user': user}), 200
+    return jsonify({'user': {
+        'id': user['id'],
+        'email': user['email'],
+        'displayName': user['display_name']
+    }}), 200
 
 # ============== CHAT HISTORY ENDPOINTS ==============
 

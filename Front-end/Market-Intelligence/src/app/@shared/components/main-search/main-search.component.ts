@@ -110,12 +110,12 @@ export class MainSearchComponent implements AfterViewChecked {
   sendQuery() {
     if (!this.query.trim() && this.attachedFiles.length === 0) return;
 
-    // 1. If no session exists but authenticated, create one first or use guest mode
-    if (!this.chatService.currentSessionId() && this.auth.isAuthenticated()) {
+    // 1. If no session exists, create one first (works for both Auth and Guest)
+    if (!this.chatService.currentSessionId()) {
       const initialQuery = this.query;
       const initialFiles = [...this.attachedFiles];
 
-      this.chatService.createSession(initialQuery.substring(0, 50) || 'New Chat').subscribe(res => {
+      this.chatService.createSession(initialQuery.substring(0, 50) || 'New Chat').subscribe((res: any) => {
         // Continue with the newly created session
         this.processNewQuery(initialQuery, initialFiles);
       });
@@ -214,6 +214,19 @@ export class MainSearchComponent implements AfterViewChecked {
 
         this.typewriteResponse(thread, res.Results);
 
+        // For guests, save messages to localStorage
+        if (sessionId && sessionId < 0) {
+          this.chatService.saveGuestMessage(sessionId, {
+            role: 'user',
+            content: query
+          });
+          this.chatService.saveGuestMessage(sessionId, {
+            role: 'assistant',
+            content: res.Results,
+            execution_time: res.execution_time
+          });
+        }
+
         // Auto-rename chat if it's the first message and title is "New Chat"
         if (sessionId && this.threads.length === 1) {
           const currentSessions = this.chatService.sessions();
@@ -242,7 +255,7 @@ export class MainSearchComponent implements AfterViewChecked {
   }
 
   private loadSessionHistory(sessionId: number) {
-    this.chatService.getChatDetails(sessionId).subscribe(res => {
+    this.chatService.getChatDetails(sessionId).subscribe((res: any) => {
       const historyThreads: ChatThread[] = [];
 
       // Group API messages into user/assistant pairs for the UI

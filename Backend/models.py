@@ -35,8 +35,8 @@ def init_chat_tables():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             title TEXT DEFAULT 'New Chat',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT (DATETIME('now', 'localtime')),
+            updated_at TIMESTAMP DEFAULT (DATETIME('now', 'localtime')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     ''')
@@ -49,7 +49,7 @@ def init_chat_tables():
             role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
             content TEXT NOT NULL,
             execution_time REAL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT (DATETIME('now', 'localtime')),
             FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
         )
     ''')
@@ -99,9 +99,10 @@ def create_chat_session(user_id: int, title: str = "New Chat") -> int:
     """Create a new chat session and return the session ID."""
     conn = get_db_connection()
     cursor = conn.cursor()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cursor.execute(
-        'INSERT INTO chat_sessions (user_id, title) VALUES (?, ?)',
-        (user_id, title)
+        'INSERT INTO chat_sessions (user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?)',
+        (user_id, title, now, now)
     )
     session_id = cursor.lastrowid
     conn.commit()
@@ -138,9 +139,10 @@ def update_chat_session_title(session_id: int, user_id: int, title: str) -> bool
     """Update chat session title."""
     conn = get_db_connection()
     cursor = conn.cursor()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cursor.execute(
         'UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?',
-        (title, datetime.now(), session_id, user_id)
+        (title, now, session_id, user_id)
     )
     affected = cursor.rowcount
     conn.commit()
@@ -165,16 +167,17 @@ def add_chat_message(session_id: int, role: str, content: str, execution_time: f
     """Add a message to a chat session."""
     conn = get_db_connection()
     cursor = conn.cursor()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cursor.execute(
-        'INSERT INTO chat_messages (session_id, role, content, execution_time) VALUES (?, ?, ?, ?)',
-        (session_id, role, content, execution_time)
+        'INSERT INTO chat_messages (session_id, role, content, execution_time, created_at) VALUES (?, ?, ?, ?, ?)',
+        (session_id, role, content, execution_time, now)
     )
     message_id = cursor.lastrowid
     
     # Update session's updated_at timestamp
     cursor.execute(
         'UPDATE chat_sessions SET updated_at = ? WHERE id = ?',
-        (datetime.now(), session_id)
+        (now, session_id)
     )
     
     conn.commit()

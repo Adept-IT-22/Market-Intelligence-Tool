@@ -325,7 +325,7 @@ class AgentManager:
 
                     source_name = self._get_display_name(source_link)
                     df = pd.read_sql_query(f'SELECT * FROM "{table}" LIMIT 10', conn) # Limit rows
-                    table_text = f"\n---\nSource: {source_name}\nData:\n{df.to_string(index=False)}\n"
+                    table_text = f"\n---\nSource: {source_name} (URI: {source_link})\nData:\n{df.to_string(index=False)}\n"
                     
                     if len(context) + len(table_text) > max_chars:
                         context += table_text[:max_chars - len(context)] + "...[Truncated]"
@@ -354,7 +354,7 @@ class AgentManager:
                     source_link = payload.get('source', 'Unknown')
                     source_name = self._get_display_name(source_link)
                     
-                    point_text = f"\n---\nSource: {source_name}\nContent:\n{text_content}\n"
+                    point_text = f"\n---\nSource: {source_name} (URI: {source_link})\nContent:\n{text_content}\n"
                     if len(context) + len(point_text) > max_chars:
                         context += point_text[:max_chars - len(context)] + "...[Truncated]"
                         break
@@ -385,7 +385,7 @@ class AgentManager:
              text = payload.get('text', str(payload))
              source_link = payload.get('source', 'Unknown')
              source_name = self._get_display_name(source_link)
-             semantic_context += f"- [Source: {source_name} | Link: {source_link}]: {text}\n"
+             semantic_context += f"- Document: {source_name} (URI: {source_link})\n  Content: {text}\n\n"
 
         # Final Synthesis
         return self.get_final_response(semantic_results, {"Hierarchical Data": detail_context, "Semantic Data": semantic_context})
@@ -405,7 +405,7 @@ class AgentManager:
                 text = payload.get('text', str(payload))
                 source_link = payload.get('source', 'Unknown')
                 source_name = self._get_display_name(source_link)
-                semantic_lines.append(f"- [Source: {source_name} | Link: {source_link}]: {text}")
+                semantic_lines.append(f"- Document: {source_name} (URI: {source_link})\n  Content: {text}")
             semantic_data = "\n".join(semantic_lines)
             
         if semantic_data is None: semantic_data = ""
@@ -413,28 +413,23 @@ class AgentManager:
         system_prompt = (
             "You are an expert Market Intelligence Analyst for Adept Technologies Ltd. "
             "Synthesize the provided data to answer the User Query accurately. "
-            "IMPORTANT CITATION RULES:\n"
-            "1. You MUST cite your sources using Markdown hyperlinks: [Filename](URI).\n"
-            "2. The visible text between brackets MUST ONLY be the filename (e.g., 'Report.pdf').\n"
-            "3. The URI inside the parentheses MUST be the full 'URI' or 'Link' provided in the context.\n"
-            "4. DO NOT include the full path or 'Semantic Match' or 'Text Source' in the visible text.\n"
-            "5. List all unique references at the very end in a 'References' section using the same [Filename](URI) format.\n"
-            "\nExample Response:\n"
-            "The project started in 2023 [ProjectPlan.docx](file:///...). For more details, see the [Reference Section].\n"
-            "\nReferences:\n"
-            "1. [ProjectPlan.docx](file:///...)"
+            "Formatting Rules:\n"
+            "1. Use clear, professional Markdown.\n"
+            "2. CITATIONS: You MUST cite sources using Markdown hyperlinks: [Filename](URI).\n"
+            "   - The visible text MUST be a clean filename/title (e.g. 'Project Alpha.pdf').\n"
+            "   - The URI MUST be the full path/link provided in the context.\n"
+            "   - NEVER output internal labels like '[Source: ... | Link: ...]' in the final response.\n"
+            "3. REFERENCES: List all unique sources at the end under a 'References' header using the same [Filename](URI) format.\n"
         )
         
         user_prompt = f"""
         User Query: "{self.query}"
         
-        === Deep Dive Data (High Confidence) ===
+        === SEARCH CONTEXT ===
         {hierarchical_data}
-        
-        === Semantic Search Context (Broad Context) ===
         {semantic_data}
         
-        Provide a detailed, Markdown-formatted answer with inline citations and a references list at the end.
+        Provide a detailed response with inline citations and a references list at the bottom.
         """
         
         try:
