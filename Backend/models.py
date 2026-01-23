@@ -5,7 +5,7 @@ import sqlite3
 import os
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "DB", "market-intelligence.db")
+DB_PATH = os.getenv("DATABASE_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "DB", "market-intelligence.db"))
 
 def get_db_connection():
     """Get a database connection with row factory."""
