@@ -122,9 +122,36 @@
         border: 1px solid rgba(0, 0, 0, 0.05);
 
         .modal-header {
-            .close-btn:hover {
-                background: rgba(0, 0, 0, 0.05);
-                border-radius: 50%;
+            .close-btn {
+                color: #71717a; // var(--text-muted) equivalent
+
+                &:hover {
+                    background: rgba(0, 0, 0, 0.05);
+                    border-radius: 50%;
+                    color: #09090b; // var(--text-primary) equivalent
+                }
+            }
+        }
+
+        // Force form field visibility in light mode
+        .auth-form {
+            mat-form-field {
+                .mat-mdc-form-field-label {
+                    color: #71717a !important; // Dark gray label
+                }
+
+                .mat-mdc-input-element {
+                    color: #09090b !important; // Black text input
+                    caret-color: #7c3aed !important; // Primary accent cursor
+
+                    &::placeholder {
+                        color: #a1a1aa !important; // Lighter gray placeholder
+                    }
+                }
+
+                .mat-icon {
+                    color: #71717a !important; // Dark gray icons
+                }
             }
         }
     }
