@@ -435,55 +435,6 @@ export class MainSearchComponent implements AfterViewChecked {
     });
   }
 
-  /**
-   * Transforms file references to SharePoint URLs.
-   */
-  private transformReferences(text: string): string {
-    const sharepointBase = 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents';
-    const localBasePath = 'C:\\Users\\imain\\Adept Technologies Ltd\\30. Cloud & Business Automation - Documents';
-    const localBasePathAlt = 'C:/Users/imain/Adept Technologies Ltd/30. Cloud & Business Automation - Documents';
-
-    const toSharePointUrl = (localPath: string): string => {
-      let relativePath = localPath
-        .replace(localBasePath, '')
-        .replace(localBasePathAlt, '')
-        .replace(/\\/g, '/')
-        .replace(/^\//, '');
-
-      const encodedPath = relativePath
-        .split('/')
-        .map((segment: string) => encodeURIComponent(segment))
-        .join('/');
-
-      return `${sharepointBase}/${encodedPath}`;
-    };
-
-    let result = text;
-
-    // Handle [Source: filename | Link: path]
-    result = result.replace(/\[Source:\s*([^\|]+)\s*\|\s*Link:\s*([^\]]+)\]/g, (match, filename, localPath) => {
-      const trimmedFilename = filename.trim();
-      const trimmedPath = localPath.trim();
-      if (trimmedPath.includes('\\') || trimmedPath.startsWith('C:')) {
-        return `[${trimmedFilename}](${toSharePointUrl(trimmedPath)})`;
-      }
-      return `[${trimmedFilename}](${trimmedPath})`;
-    });
-
-    // Remove duplicate filename "filename [filename](path)"
-    result = result.replace(/([^\[\]]+?)\s+\[\1\]\(/g, '[$1](');
-
-    // Standard markdown link [filename](local_path)
-    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, localPath) => {
-      if (localPath.includes('\\') || localPath.startsWith('C:')) {
-        return `[${filename}](${toSharePointUrl(localPath)})`;
-      }
-      return match;
-    });
-
-    return result;
-  }
-
   // ============ FILE HANDLING ============
   onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
