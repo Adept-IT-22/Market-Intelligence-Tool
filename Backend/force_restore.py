@@ -1,7 +1,5 @@
 import os
-import time
-from qdrant_client import QdrantClient
-from qdrant_client.http import models
+import requests
 
 # Config
 QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
@@ -10,41 +8,40 @@ COLLECTION_NAME = "adept_database"
 SNAPSHOT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "snapshots", "market_intelligence_backup.snapshot")
 
 def restore():
-    print(f"Connecting to {QDRANT_HOST}:{QDRANT_PORT}...")
-    client = QdrantClient(url=f"http://{QDRANT_HOST}:{QDRANT_PORT}")
+    url = f"http://{QDRANT_HOST}:{QDRANT_PORT}/collections/{COLLECTION_NAME}/snapshots/upload"
+    print(f"Uploading to {url}...")
     
-    # Check if snapshot exists
     if not os.path.exists(SNAPSHOT_PATH):
-        print(f"Error: Snapshot not found at {SNAPSHOT_PATH}")
+        print(f"Snapshot file missing at {SNAPSHOT_PATH}!")
         return
 
-    print("Reading snapshot...")
-    # There isn't a direct "upload_snapshot" method in high-level client that takes a file path for collection recovery easily 
-    # except via the REST API wrapper.
-    # However, client.recover_snapshot exists!
-    
-    try:
-        # Note: recover_snapshot takes a location (URL or path on server)
-        # But we want to UPLOAD.
-        # The Python client doesn't expose the upload-snapshot-to-recover endpoint easily.
-        # Let's use the low-level API proxy.
+    # Open file in binary mode
+    with open(SNAPSHOT_PATH, 'rb') as f:
+        # The key must be 'snapshot'
+        files = {'snapshot': (os.path.basename(SNAPSHOT_PATH), f)}
         
-        print(f"Uploading and recovering from {SNAPSHOT_PATH}...")
-        with open(SNAPSHOT_PATH, "rb") as f:
-            client.http.snapshot_api.recover_from_uploaded_snapshot(
-                collection_name=COLLECTION_NAME,
-                wait=True,
-                snapshot=f
-            )
+        # Priority=snapshot to force overwrite
+        params = {'priority': 'snapshot'}
         
-        print("Success! Snapshot restored.")
-        
-        # Verify
-        count = client.count(COLLECTION_NAME)
-        print(f"Collection now has {count.count} points.")
-        
-    except Exception as e:
-        print(f"Failed: {e}")
+        try:
+            response = requests.post(url, files=files, params=params)
+            print(f"Status Code: {response.status_code}")
+            print(f"Response: {response.text}")
+            
+            if response.status_code != 200 and 'collection' in response.text and 'exist' in response.text:
+                 # If collection missing, create and retry
+                 print("Collection missing, attempting to create...")
+                 create_url = f"http://{QDRANT_HOST}:{QDRANT_PORT}/collections/{COLLECTION_NAME}"
+                 requests.put(create_url, json={"vectors": {"size": 384, "distance": "Cosine"}})
+                 
+                 # Retry upload
+                 f.seek(0)
+                 response = requests.post(url, files=files, params=params)
+                 print(f"Retry Status: {response.status_code}")
+                 print(f"Retry Response: {response.text}")
+
+        except Exception as e:
+            print(f"Error: {e}")
 
 if __name__ == "__main__":
     restore()
