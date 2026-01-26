@@ -6,7 +6,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../DB/market-intelligence.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "DB/market-intelligence.db")
 
 def migrate_db():
     if not os.path.exists(DB_PATH):
@@ -18,19 +18,8 @@ def migrate_db():
     cursor = conn.cursor()
 
     try:
-        # 1. Rename existing Master table if it hasn't been done
-        # Check if Master_Old exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='Master_Old'")
-        if not cursor.fetchone():
-            logger.info("Renaming existing 'Master' table to 'Master_Old'...")
-            cursor.execute("ALTER TABLE Master RENAME TO Master_Old")
-        else:
-            logger.info("'Master_Old' already exists. Assuming migration partially done or re-running.")
-            # Optional: Drop 'Master' if we want to recreate it fresh
-            cursor.execute("DROP TABLE IF EXISTS Master")
-
-        # 2. Create New Master Table (Level 1)
-        logger.info("Creating new 'Master' table...")
+        # Create Master Table if not exists
+        logger.info("Creating 'Master' table...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS Master (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
