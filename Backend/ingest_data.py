@@ -350,30 +350,40 @@ class DataIngester:
 
     def _process_image(self, file_path, master_id, routing_table_name, sectors):
         """
-        Attempts to use Groq Vision for OCR. 
-        Currently disabled/guarded as Llama 3.2 Vision models are decommissioned on Groq.
+        Uses Google Gemini (Flash) for OCR/Vision since Groq Vision is unavailable.
         """
-        logger.info(f"Processing image: {file_path}")
-        logger.warning("Groq Vision models (Llama 3.2 11b/90b) are currently DECOMMISSIONED by Groq.")
-        logger.warning("Image OCR is skipped. Please provide a valid OpenAI/Gemini key or wait for Groq updates.")
+        logger.info(f"Processing image with Gemini: {file_path}")
         
-        # Placeholder for future implementation or fallback
-        # For now, we insert a placeholder text so the record exists but isn't empty
-        placeholder_text = "[Image OCR Skipped: Vision capabilities currently unavailable downstream]"
-        self._upsert_text_chunks(placeholder_text, file_path, master_id, routing_table_name, sectors, "Image Content (Skipped)")
-        
-        return
-        
-        # Original implementation (kept for reference if models return)
-        """
+        if not GOOGLE_API_KEY:
+            logger.warning("GROQ Vision is decommissioned and GOOGLE_API_KEY is missing.")
+            placeholder_text = "[Image OCR Skipped: Missing API Keys]"
+            self._upsert_text_chunks(placeholder_text, file_path, master_id, routing_table_name, sectors, "Image Content (Skipped)")
+            return
+
         try:
-            base64_image = self._encode_image(file_path)
-            chat_completion = self.groq_client.chat.completions.create(
-                messages=[...],
-                model="llama-3.2-90b-vision-preview",
-            )
-            ...
-        """
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            
+            # Load image using PIL
+            image_file = Image.open(file_path)
+            
+            response = model.generate_content([
+                "Transcribe the text in this image perfectly. Output ONLY the text content. If it's a chart or diagram, describe the key data points in detail.", 
+                image_file
+            ])
+            
+            text_content = response.text
+            
+            if not text_content or not text_content.strip():
+                logger.warning(f"No text extracted from image: {file_path}")
+                return
+
+            logger.info("OCR Success (Gemini). Upserting text...")
+            self._upsert_text_chunks(text_content, file_path, master_id, routing_table_name, sectors, "Image Content")
+            self.conn.commit()
+            
+        except Exception as e:
+            logger.error(f"Gemini OCR failed for {file_path}: {e}")
+            raise e
 
     def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, title_prefix):
         chunks = self._chunk_text(text, 1000)
