@@ -25,11 +25,11 @@ QDRANT_URL = os.getenv("QDRANT_URL")
 
 # Project Paths
 current_directory = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_directory)
 DATABASE_PATH = os.getenv("DATABASE_PATH")
 
 if not DATABASE_PATH:
-    DATABASE_PATH = os.path.join(project_root, "DB", "market-intelligence.db")
+    # DB folder is inside the app directory (same level as agent_manager.py)
+    DATABASE_PATH = os.path.join(current_directory, "DB", "market-intelligence.db")
     logger.info(f"DATABASE_PATH not found in .env, using default: {DATABASE_PATH}")
 
 # Models
