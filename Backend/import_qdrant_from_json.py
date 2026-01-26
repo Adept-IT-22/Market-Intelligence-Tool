@@ -8,9 +8,7 @@ from qdrant_client.http import models
 QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 COLLECTION_NAME = "adept_database"
-# Note: Input file is at project root because we SCP'd it to ~/mkt-int/.../Backend/
-# But inside container, WORKDIR is /app, so path is simply filename if it's in Backend folder.
-INPUT_FILE = "qdrant_dump.json"
+DEFAULT_INPUT_FILE = "qdrant_dump.json"
 
 def import_data():
     url = f"http://{QDRANT_HOST}:{QDRANT_PORT}"
@@ -25,16 +23,27 @@ def import_data():
             vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE)
         )
     
-    if not os.path.exists(INPUT_FILE):
-        print(f"Error: {INPUT_FILE} not found inside container.")
-        # Fallback check
-        if os.path.exists(f"/app/{INPUT_FILE}"):
-             INPUT_FILE = f"/app/{INPUT_FILE}"
-        else:
-             return
+    # Logic to find the file
+    possible_paths = [
+        DEFAULT_INPUT_FILE,
+        f"/app/{DEFAULT_INPUT_FILE}",
+        f"Backend/{DEFAULT_INPUT_FILE}"
+    ]
+    
+    found_file = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            found_file = path
+            break
+            
+    if not found_file:
+        print(f"Error: {DEFAULT_INPUT_FILE} not found. Searched in: {possible_paths}")
+        print("Current Working Directory:", os.getcwd())
+        print("Directory Contents:", os.listdir(os.getcwd()))
+        return
 
-    print(f"Loading data from {INPUT_FILE}...")
-    with open(INPUT_FILE, 'r') as f:
+    print(f"Loading data from {found_file}...")
+    with open(found_file, 'r') as f:
         data = json.load(f)
         
     print(f"Found {len(data)} points. Uploading...")
