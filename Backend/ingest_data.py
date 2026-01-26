@@ -16,7 +16,10 @@ from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
-from groq import Groq
+from groq import Groq # Keep for legacy/future
+import google.generativeai as genai
+from PIL import Image
+import io
 
 load_dotenv()
 
@@ -31,6 +34,7 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
 COLLECTION_NAME = "adept_database"
 EMBEDDING_MODEL = "BAAI/bge-small-en"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 class DataIngester:
     def __init__(self):
@@ -47,10 +51,49 @@ class DataIngester:
         self.qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
         self._ensure_collection()
 
-        # Initialize Groq
-        if not GROQ_API_KEY:
-            logger.warning("GROQ_API_KEY not found. Image OCR will fail.")
-        self.groq_client = Groq(api_key=GROQ_API_KEY)
+        # Initialize Groq (Optional)
+        self.groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+        # Initialize Gemini
+        if GOOGLE_API_KEY:
+            genai.configure(api_key=GOOGLE_API_KEY)
+        else:
+            logger.warning("GOOGLE_API_KEY not found. Gemini OCR will fail.")
+
+    def _process_image(self, file_path, master_id, routing_table_name, sectors):
+        """
+        Uses Google Gemini (Flash) for OCR/Vision since Groq Vision is unavailable.
+        """
+        logger.info(f"Processing image with Gemini: {file_path}")
+        
+        if not GOOGLE_API_KEY:
+            logger.error("Skipping Image OCR: GOOGLE_API_KEY is missing.")
+            return
+
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            # Load image using PIL
+            image_file = Image.open(file_path)
+            
+            response = model.generate_content([
+                "Transcribe the text in this image perfectly. Output ONLY the text content. If it's a chart or diagram, describe the key data points in detail.", 
+                image_file
+            ])
+            
+            text_content = response.text
+            
+            if not text_content or not text_content.strip():
+                logger.warning(f"No text extracted from image: {file_path}")
+                return
+
+            logger.info("OCR Success (Gemini). Upserting text...")
+            self._upsert_text_chunks(text_content, file_path, master_id, routing_table_name, sectors, "Image Content")
+            self.conn.commit()
+            
+        except Exception as e:
+            logger.error(f"Gemini OCR failed for {file_path}: {e}")
+            raise e
 
     def _ensure_collection(self):
         try:
@@ -307,43 +350,30 @@ class DataIngester:
 
     def _process_image(self, file_path, master_id, routing_table_name, sectors):
         """
-        Uses Groq Llama 3.2 Vision to transcribe/OCR the image.
+        Attempts to use Groq Vision for OCR. 
+        Currently disabled/guarded as Llama 3.2 Vision models are decommissioned on Groq.
         """
-        logger.info(f"Uploading image to Groq for OCR: {file_path}")
+        logger.info(f"Processing image: {file_path}")
+        logger.warning("Groq Vision models (Llama 3.2 11b/90b) are currently DECOMMISSIONED by Groq.")
+        logger.warning("Image OCR is skipped. Please provide a valid OpenAI/Gemini key or wait for Groq updates.")
+        
+        # Placeholder for future implementation or fallback
+        # For now, we insert a placeholder text so the record exists but isn't empty
+        placeholder_text = "[Image OCR Skipped: Vision capabilities currently unavailable downstream]"
+        self._upsert_text_chunks(placeholder_text, file_path, master_id, routing_table_name, sectors, "Image Content (Skipped)")
+        
+        return
+        
+        # Original implementation (kept for reference if models return)
+        """
         try:
             base64_image = self._encode_image(file_path)
-            
             chat_completion = self.groq_client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Transcribe the text in this image perfectly. Output ONLY the text content. If it's a chart or diagram, describe the key data points in detail."},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}",
-                                },
-                            },
-                        ],
-                    }
-                ],
-                model="llama-3.2-11b-vision-preview",
+                messages=[...],
+                model="llama-3.2-90b-vision-preview",
             )
-            
-            text_content = chat_completion.choices[0].message.content
-            
-            if not text_content or not text_content.strip():
-                logger.warning(f"No text extracted from image: {file_path}")
-                return
-
-            logger.info("OCR Success. Upserting text...")
-            self._upsert_text_chunks(text_content, file_path, master_id, routing_table_name, sectors, "Image Content")
-            self.conn.commit()
-            
-        except Exception as e:
-            logger.error(f"Image OCR failed for {file_path}: {e}")
-            raise e
+            ...
+        """
 
     def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, title_prefix):
         chunks = self._chunk_text(text, 1000)
