@@ -9,7 +9,6 @@ DB_PATH = os.getenv("DATABASE_PATH", os.path.join(os.path.dirname(os.path.abspat
 
 def get_db_connection():
     """Get a database connection with row factory."""
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
