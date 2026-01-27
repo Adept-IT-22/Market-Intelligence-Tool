@@ -9,6 +9,7 @@ import { gsap } from 'gsap';
 import { ChatService, ChatMessage as ServiceChatMessage } from '../../services/chat.service';
 import { AuthService } from '../../services/auth.service';
 import { effect } from '@angular/core';
+import { timeout, catchError, throwError } from 'rxjs';
 
 interface ChatMessage {
   content: string;
@@ -201,52 +202,63 @@ export class MainSearchComponent implements AfterViewChecked {
 
     this.http.post(`${environment.apiUrl}/query`, payload, {
       headers: { 'Authorization': `Bearer ${this.auth.getToken()}` }
-    }).subscribe({
-      next: (res: any) => {
-        thread.isLoading = false;
-        thread.isTyping = true;
-        thread.executionTime = res.execution_time;
-
-        thread.aiMessage = {
-          content: '',
-          timestamp: new Date()
-        };
-
-        this.typewriteResponse(thread, res.Results);
-
-        // For guests, save messages to localStorage
-        if (sessionId && sessionId < 0) {
-          this.chatService.saveGuestMessage(sessionId, {
-            role: 'user',
-            content: query
-          });
-          this.chatService.saveGuestMessage(sessionId, {
-            role: 'assistant',
-            content: res.Results,
-            execution_time: res.execution_time
-          });
-        }
-
-        // Auto-rename chat if it's the first message and title is "New Chat"
-        if (sessionId && this.threads.length === 1) {
-          const currentSessions = this.chatService.sessions();
-          const session = currentSessions.find(s => s.id === sessionId);
-          if (session && session.title === 'New Chat') {
-            // Use a short summary of the result or the query as name
-            const newTitle = query.length > 30 ? query.substring(0, 30) + '...' : query;
-            this.chatService.renameChat(sessionId, newTitle).subscribe();
+    })
+      .pipe(
+        timeout(120000), // 120 seconds timeout for slow backend processing
+        catchError((err) => {
+          if (err.name === 'TimeoutError') {
+            return throwError(() => ({ error: { error: 'Request timed out. The system is taking longer than expected. Please try again.' } }));
           }
+          return throwError(() => err);
+        })
+      )
+      .subscribe({
+        next: (res: any) => {
+          thread.isLoading = false;
+          thread.isTyping = true;
+          thread.executionTime = res.execution_time;
+
+          thread.aiMessage = {
+            content: '',
+            timestamp: new Date()
+          };
+
+          this.typewriteResponse(thread, res.Results);
+
+          // For guests, save messages to localStorage
+          if (sessionId && sessionId < 0) {
+            this.chatService.saveGuestMessage(sessionId, {
+              role: 'user',
+              content: query
+            });
+            this.chatService.saveGuestMessage(sessionId, {
+              role: 'assistant',
+              content: res.Results,
+              execution_time: res.execution_time
+            });
+          }
+
+          // Auto-rename chat if it's the first message and title is "New Chat"
+          if (sessionId && this.threads.length === 1) {
+            const currentSessions = this.chatService.sessions();
+            const session = currentSessions.find(s => s.id === sessionId);
+            if (session && session.title === 'New Chat') {
+              // Use a short summary of the result or the query as name
+              const newTitle = query.length > 30 ? query.substring(0, 30) + '...' : query;
+              this.chatService.renameChat(sessionId, newTitle).subscribe();
+            }
+          }
+        },
+        error: (err) => {
+          console.error('Error fetching data', err);
+          thread.isLoading = false;
+          const errorMsg = err?.error?.error || err?.message || 'Could not reach the intelligence engine. Please try again later.';
+          thread.aiMessage = {
+            content: `⚠️ Error: ${errorMsg}`,
+            timestamp: new Date()
+          };
         }
-      },
-      error: (err) => {
-        console.error('Error fetching data', err);
-        thread.isLoading = false;
-        thread.aiMessage = {
-          content: "⚠️ Error: Could not reach the intelligence engine. Please try again later.",
-          timestamp: new Date()
-        };
-      }
-    });
+      });
 
     // Update cache because threads array reference might change or items might be added
     if (sessionId) {
