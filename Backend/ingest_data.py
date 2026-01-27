@@ -19,7 +19,6 @@ from qdrant_client.models import VectorParams, Distance, PointStruct
 from groq import Groq # Keep for legacy/future
 import google.generativeai as genai
 from PIL import Image
-import io
 
 load_dotenv()
 
@@ -28,7 +27,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../DB/market-intelligence.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "DB/market-intelligence.db")
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
 COLLECTION_NAME = "adept_database"
@@ -60,40 +59,7 @@ class DataIngester:
         else:
             logger.warning("GOOGLE_API_KEY not found. Gemini OCR will fail.")
 
-    def _process_image(self, file_path, master_id, routing_table_name, sectors):
-        """
-        Uses Google Gemini (Flash) for OCR/Vision since Groq Vision is unavailable.
-        """
-        logger.info(f"Processing image with Gemini: {file_path}")
-        
-        if not GOOGLE_API_KEY:
-            logger.error("Skipping Image OCR: GOOGLE_API_KEY is missing.")
-            return
 
-        try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            
-            # Load image using PIL
-            image_file = Image.open(file_path)
-            
-            response = model.generate_content([
-                "Transcribe the text in this image perfectly. Output ONLY the text content. If it's a chart or diagram, describe the key data points in detail.", 
-                image_file
-            ])
-            
-            text_content = response.text
-            
-            if not text_content or not text_content.strip():
-                logger.warning(f"No text extracted from image: {file_path}")
-                return
-
-            logger.info("OCR Success (Gemini). Upserting text...")
-            self._upsert_text_chunks(text_content, file_path, master_id, routing_table_name, sectors, "Image Content")
-            self.conn.commit()
-            
-        except Exception as e:
-            logger.error(f"Gemini OCR failed for {file_path}: {e}")
-            raise e
 
     def _ensure_collection(self):
         try:
@@ -344,19 +310,17 @@ class DataIngester:
             logger.error(f"URL processing failed for {url}: {e}")
             raise e
     
-    def _encode_image(self, image_path):
-        with open(image_path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
+
 
     def _process_image(self, file_path, master_id, routing_table_name, sectors):
         """
-        Uses Google Gemini (Flash) for OCR/Vision since Groq Vision is unavailable.
+        Uses Google Gemini 2.0 Flash for OCR/Vision to extract text from images.
         """
         logger.info(f"Processing image with Gemini: {file_path}")
         
         if not GOOGLE_API_KEY:
-            logger.warning("GROQ Vision is decommissioned and GOOGLE_API_KEY is missing.")
-            placeholder_text = "[Image OCR Skipped: Missing API Keys]"
+            logger.warning("GOOGLE_API_KEY is missing. Inserting placeholder for image OCR.")
+            placeholder_text = "[Image OCR Skipped: Missing GOOGLE_API_KEY]"
             self._upsert_text_chunks(placeholder_text, file_path, master_id, routing_table_name, sectors, "Image Content (Skipped)")
             return
 
