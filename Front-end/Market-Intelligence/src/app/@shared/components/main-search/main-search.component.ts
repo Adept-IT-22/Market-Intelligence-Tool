@@ -65,11 +65,23 @@ export class MainSearchComponent implements AfterViewChecked {
     "Synthesizing insights..."
   ];
 
+  // Onboarding modal
+  showOnboarding: boolean = false;
+  demoQueries = {
+    adept: "What innovation projects is Adept Technologies currently working on?",
+    market: "What are Kenya's key economic sectors and their growth trends?",
+    mixed: "How could Adept's chatbot innovation be applied to analyze Kenyan market sentiment?"
+  };
+
   constructor(
     private http: HttpClient,
     public chatService: ChatService,
     private auth: AuthService
   ) {
+    // Check if user has seen onboarding
+    const hasSeenOnboarding = localStorage.getItem('hasSeenOnboarding');
+    this.showOnboarding = !hasSeenOnboarding;
+
     // React to session changes
     effect(() => {
       const sessionId = this.chatService.currentSessionId();
@@ -481,5 +493,19 @@ export class MainSearchComponent implements AfterViewChecked {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  // ============ ONBOARDING MODAL ============
+  closeOnboarding() {
+    this.showOnboarding = false;
+    localStorage.setItem('hasSeenOnboarding', 'true');
+  }
+
+  useDemoQuery(demoQuery: string) {
+    this.query = demoQuery;
+    this.closeOnboarding();
+    setTimeout(() => {
+      this.sendQuery();
+    }, 300);
   }
 }
