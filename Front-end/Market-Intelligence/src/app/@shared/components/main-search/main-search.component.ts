@@ -1,6 +1,6 @@
-import { CommonModule } from '@angular/common';
+import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, ElementRef, ViewChild, AfterViewChecked } from '@angular/core';
+import { Component, ElementRef, ViewChild, AfterViewChecked, PLATFORM_ID, Inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { MarkdownModule } from 'ngx-markdown';
@@ -76,11 +76,14 @@ export class MainSearchComponent implements AfterViewChecked {
   constructor(
     private http: HttpClient,
     public chatService: ChatService,
-    private auth: AuthService
+    private auth: AuthService,
+    @Inject(PLATFORM_ID) private platformId: Object
   ) {
-    // Check if user has seen onboarding
-    const hasSeenOnboarding = localStorage.getItem('hasSeenOnboarding');
-    this.showOnboarding = !hasSeenOnboarding;
+    // Check if user has seen onboarding (only in browser, not during SSR)
+    if (isPlatformBrowser(this.platformId)) {
+      const hasSeenOnboarding = localStorage.getItem('mit_hasSeenOnboarding');
+      this.showOnboarding = !hasSeenOnboarding;
+    }
 
     // React to session changes
     effect(() => {
@@ -498,14 +501,15 @@ export class MainSearchComponent implements AfterViewChecked {
   // ============ ONBOARDING MODAL ============
   closeOnboarding() {
     this.showOnboarding = false;
-    localStorage.setItem('hasSeenOnboarding', 'true');
+    if (isPlatformBrowser(this.platformId)) {
+      localStorage.setItem('mit_hasSeenOnboarding', 'true');
+    }
   }
 
   useDemoQuery(demoQuery: string) {
     this.query = demoQuery;
     this.closeOnboarding();
-    setTimeout(() => {
-      this.sendQuery();
-    }, 300);
+    // Execute query immediately after modal closes
+    this.sendQuery();
   }
 }
