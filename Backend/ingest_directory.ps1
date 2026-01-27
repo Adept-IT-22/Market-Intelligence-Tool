@@ -2,13 +2,13 @@
 # This script ingests all supported files from a directory into the Market Intelligence database
 
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [string]$InputDir,
     
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string]$Sectors = "Innovations,Product Development",
     
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string]$Summary = "Adept Technologies Innovation Projects"
 )
 
@@ -19,20 +19,20 @@ if (!(Test-Path $InputDir)) {
     exit 1
 }
 
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Market Intelligence - Batch Ingestion" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "========================================"
+Write-Host "Market Intelligence - Batch Ingestion"
+Write-Host "========================================"
 Write-Host "Input Directory: $InputDir"
 Write-Host "Sectors: $Sectors"
 Write-Host "Summary: $Summary"
-Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "========================================"
 Write-Host ""
 
 # Activate virtual environment if it exists
 $VenvPath = Join-Path $ScriptDir "venv\Scripts\Activate.ps1"
 if (Test-Path $VenvPath) {
     & $VenvPath
-    Write-Host "✓ Virtual environment activated" -ForegroundColor Green
+    Write-Host "Virtual environment activated" -ForegroundColor Green
 }
 
 # Run the ingest script
@@ -40,6 +40,6 @@ $IngestScript = Join-Path $ScriptDir "ingest_data.py"
 python $IngestScript --input $InputDir --sectors $Sectors --summary $Summary
 
 Write-Host ""
-Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "========================================"
 Write-Host "Ingestion completed!" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "========================================"
