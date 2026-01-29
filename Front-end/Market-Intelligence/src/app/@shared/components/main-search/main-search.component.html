@@ -1,5 +1,63 @@
 <div class="search-page" [class.has-response]="threads.length > 0 || isLoading">
 
+    <!-- Onboarding Modal -->
+    <div class="onboarding-overlay" *ngIf="showOnboarding">
+        <div class="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+            <button class="close-btn" (click)="closeOnboarding()" aria-label="Close onboarding dialog">
+                <mat-icon>close</mat-icon>
+            </button>
+
+            <div class="modal-content">
+                <mat-icon class="welcome-icon">lightbulb</mat-icon>
+                <h2 id="onboarding-title">Welcome to Market Intelligence</h2>
+                <p class="subtitle">Your AI-powered research assistant for Kenyan market insights and Adept Technologies
+                    innovations</p>
+
+                <div class="features">
+                    <div class="feature">
+                        <mat-icon>analytics</mat-icon>
+                        <h3>Market Analysis</h3>
+                        <p>Get insights on Kenya's economy, sectors, and trends</p>
+                    </div>
+                    <div class="feature">
+                        <mat-icon>category</mat-icon>
+                        <h3>Innovation Portfolio</h3>
+                        <p>Explore Adept's internal projects and systems</p>
+                    </div>
+                    <div class="feature">
+                        <mat-icon>upload_file</mat-icon>
+                        <h3>Document Analysis</h3>
+                        <p>Upload files for AI-powered insights (Max 10MB)</p>
+                    </div>
+                </div>
+
+                <div class="demo-queries">
+                    <h3>Try these example questions:</h3>
+                    <div class="query-cards">
+                        <button class="query-card" (click)="useDemoQuery(demoQueries.adept)">
+                            <mat-icon>rocket_launch</mat-icon>
+                            <span>{{ demoQueries.adept }}</span>
+                        </button>
+                        <button class="query-card" (click)="useDemoQuery(demoQueries.market)">
+                            <mat-icon>public</mat-icon>
+                            <span>{{ demoQueries.market }}</span>
+                        </button>
+                        <button class="query-card" (click)="useDemoQuery(demoQueries.mixed)">
+                            <mat-icon>merge_type</mat-icon>
+                            <span>{{ demoQueries.mixed }}</span>
+                        </button>
+                    </div>
+                </div>
+
+                <button class="get-started-btn" (click)="closeOnboarding()">
+                    Get Started
+                    <mat-icon>arrow_forward</mat-icon>
+                </button>
+            </div>
+        </div>
+    </div>
+
+
     <!-- Hero section shown when no activity -->
     <div class="hero-section" *ngIf="threads.length === 0 && !isLoading">
         <h1>Market Intelligence</h1>
