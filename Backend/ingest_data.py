@@ -6,6 +6,7 @@ import re
 import argparse
 import requests
 import sqlite3
+import base64
 from datetime import datetime
 from bs4 import BeautifulSoup
 import pypdf
@@ -15,6 +16,9 @@ from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
+from groq import Groq # Keep for legacy/future
+import google.generativeai as genai
+from PIL import Image
 
 load_dotenv()
 
@@ -23,11 +27,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../DB/market-intelligence.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "DB/market-intelligence.db")
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
 COLLECTION_NAME = "adept_database"
 EMBEDDING_MODEL = "BAAI/bge-small-en"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 class DataIngester:
     def __init__(self):
@@ -43,6 +49,17 @@ class DataIngester:
         logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
         self.qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
         self._ensure_collection()
+
+        # Initialize Groq (Optional)
+        self.groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+        # Initialize Gemini
+        if GOOGLE_API_KEY:
+            genai.configure(api_key=GOOGLE_API_KEY)
+        else:
+            logger.warning("GOOGLE_API_KEY not found. Gemini OCR will fail.")
+
+
 
     def _ensure_collection(self):
         try:
@@ -80,7 +97,7 @@ class DataIngester:
             input_path = os.path.abspath(input_path)
 
         # Validate Input BEFORE creating Master entry
-        supported_types = ['excel', 'pdf', 'url', 'docx', 'pptx']
+        supported_types = ['excel', 'pdf', 'url', 'docx', 'pptx', 'image']
         st_lower = source_type.lower()
         if st_lower not in supported_types:
              logger.error(f"Unsupported source type: {source_type}")
@@ -109,17 +126,17 @@ class DataIngester:
                 self._process_docx(input_path, master_id, routing_table_name, sectors)
             elif st_lower == 'pptx' or input_path.endswith('.pptx'):
                 self._process_pptx(input_path, master_id, routing_table_name, sectors)
+            elif st_lower == 'image' or input_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                self._process_image(input_path, master_id, routing_table_name, sectors)
             
             self.summary_report["success"].append(input_path)
+            logger.info("Ingestion Complete.")
+
         except Exception as e:
             logger.error(f"Ingestion failed for {input_path}: {e}")
             self.summary_report["failed"].append({"path": input_path, "error": str(e)})
-            raise e
-                
-            logger.info("Ingestion Complete.")
             
-        except Exception as e:
-            logger.error(f"Ingestion failed: {e}")
+            # Rollback logic for clean DB state
             if 'routing_table_name' in locals() and 'master_id' in locals():
                 logger.warning(f"Rolling back: Dropping routing table {routing_table_name}")
                 try:
@@ -292,6 +309,45 @@ class DataIngester:
         except Exception as e:
             logger.error(f"URL processing failed for {url}: {e}")
             raise e
+    
+
+
+    def _process_image(self, file_path, master_id, routing_table_name, sectors):
+        """
+        Uses Google Gemini 2.0 Flash for OCR/Vision to extract text from images.
+        """
+        logger.info(f"Processing image with Gemini: {file_path}")
+        
+        if not GOOGLE_API_KEY:
+            logger.warning("GOOGLE_API_KEY is missing. Inserting placeholder for image OCR.")
+            placeholder_text = "[Image OCR Skipped: Missing GOOGLE_API_KEY]"
+            self._upsert_text_chunks(placeholder_text, file_path, master_id, routing_table_name, sectors, "Image Content (Skipped)")
+            return
+
+        try:
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            
+            # Load image using PIL
+            image_file = Image.open(file_path)
+            
+            response = model.generate_content([
+                "Transcribe the text in this image perfectly. Output ONLY the text content. If it's a chart or diagram, describe the key data points in detail.", 
+                image_file
+            ])
+            
+            text_content = response.text
+            
+            if not text_content or not text_content.strip():
+                logger.warning(f"No text extracted from image: {file_path}")
+                return
+
+            logger.info("OCR Success (Gemini). Upserting text...")
+            self._upsert_text_chunks(text_content, file_path, master_id, routing_table_name, sectors, "Image Content")
+            self.conn.commit()
+            
+        except Exception as e:
+            logger.error(f"Gemini OCR failed for {file_path}: {e}")
+            raise e
 
     def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, title_prefix):
         chunks = self._chunk_text(text, 1000)
@@ -338,7 +394,7 @@ class DataIngester:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest data into Market Intelligence V2 Ecosystem")
     parser.add_argument("--input", required=True, help="Path to file, directory, or URL")
-    parser.add_argument("--type", choices=['excel', 'pdf', 'url', 'docx', 'pptx', 'auto'], default='auto', help="Type of input data")
+    parser.add_argument("--type", choices=['excel', 'pdf', 'url', 'docx', 'pptx', 'image', 'auto'], default='auto', help="Type of input data")
     parser.add_argument("--title", help="Title for the dataset")
     parser.add_argument("--sectors", default="General", help="Comma-separated sectors")
     parser.add_argument("--summary", default="", help="Brief summary of the data")
@@ -356,6 +412,7 @@ if __name__ == "__main__":
                 elif ext == '.pdf': f_type = 'pdf'
                 elif ext == '.docx': f_type = 'docx'
                 elif ext == '.pptx': f_type = 'pptx'
+                elif ext in ['.png', '.jpg', '.jpeg', '.webp']: f_type = 'image'
                 
                 if f_type:
                     full_path = os.path.join(root, file)
@@ -371,7 +428,13 @@ if __name__ == "__main__":
 
     else:
         # Use provided type or auto-detect
-        type_map = {'.xlsx': 'excel', '.xls': 'excel', '.pdf': 'pdf', '.docx': 'docx', '.pptx': 'pptx'}
+        type_map = {
+            '.xlsx': 'excel', '.xls': 'excel', 
+            '.pdf': 'pdf', 
+            '.docx': 'docx', 
+            '.pptx': 'pptx',
+            '.png': 'image', '.jpg': 'image', '.jpeg': 'image', '.webp': 'image'
+        }
         f_type = args.type
         if f_type == 'auto':
             ext = os.path.splitext(args.input)[1].lower()
