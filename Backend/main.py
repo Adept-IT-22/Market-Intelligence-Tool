@@ -261,6 +261,36 @@ def upload_file():
         file.save(file_path)
         logger.info(f"File uploaded: {unique_filename} ({file_size / 1024:.1f} KB)")
         
+        # --- Trigger Automatic Ingestion ---
+        try:
+            from ingest_data import DataIngester
+            logger.info(f"Auto-ingesting file: {unique_filename}")
+            ingester = DataIngester()
+            
+            # Determine type
+            ext = filename.rsplit('.', 1)[1].lower()
+            type_map = {
+                'xlsx': 'excel', 'xls': 'excel', 
+                'pdf': 'pdf', 'docx': 'docx', 'pptx': 'pptx',
+                'png': 'image', 'jpg': 'image', 'jpeg': 'image', 'webp': 'image'
+            }
+            f_type = type_map.get(ext, 'auto')
+            
+            # Process
+            ingester.process_input(
+                input_path=file_path,
+                source_type=f_type,
+                title=filename,
+                sectors="General", # Default sector
+                summary="Uploaded via API"
+            )
+            logger.info("Auto-ingestion successful.")
+            
+        except Exception as ingest_err:
+             logger.error(f"Auto-ingestion failed: {ingest_err}")
+             # We don't return 500 here because the file WAS uploaded, just not indexed.
+             # You might want to include a warning in the response.
+
         duration = time.perf_counter() - start_time
         return {
             "success": True,
