@@ -53,6 +53,12 @@ export class AuthService {
     );
   }
 
+  forgotPassword(email: string) {
+    return this.http.post<{ message: string; contact: string }>(`${environment.apiUrl}/auth/forgot-password`, {
+      email
+    });
+  }
+
   logout() {
     localStorage.removeItem(this.TOKEN_KEY);
     this.currentUser.set(null);

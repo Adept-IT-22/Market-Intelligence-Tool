@@ -29,9 +29,10 @@ export class AuthModalComponent {
     private auth = inject(AuthService);
     private dialogRef = inject(MatDialogRef<AuthModalComponent>);
 
-    mode = signal<'login' | 'signup'>('login');
+    mode = signal<'login' | 'signup' | 'forgot'>('login');
     isLoading = signal<boolean>(false);
     errorMessage = signal<string | null>(null);
+    successMessage = signal<string | null>(null);
 
     authForm = this.fb.group({
         email: ['', [Validators.required, Validators.email]],
@@ -42,9 +43,27 @@ export class AuthModalComponent {
     switchMode() {
         this.mode.set(this.mode() === 'login' ? 'signup' : 'login');
         this.errorMessage.set(null);
+        this.successMessage.set(null);
+    }
+
+    showForgotPassword() {
+        this.mode.set('forgot');
+        this.errorMessage.set(null);
+        this.successMessage.set(null);
+    }
+
+    backToLogin() {
+        this.mode.set('login');
+        this.errorMessage.set(null);
+        this.successMessage.set(null);
     }
 
     onSubmit() {
+        if (this.mode() === 'forgot') {
+            this.handleForgotPassword();
+            return;
+        }
+
         if (this.authForm.invalid) return;
 
         this.isLoading.set(true);
@@ -64,6 +83,28 @@ export class AuthModalComponent {
             error: (err) => {
                 this.isLoading.set(false);
                 this.errorMessage.set(err.error?.error || 'Authentication failed. Please try again.');
+            }
+        });
+    }
+
+    private handleForgotPassword() {
+        const email = this.authForm.get('email')?.value;
+        if (!email) {
+            this.errorMessage.set('Please enter your email address');
+            return;
+        }
+
+        this.isLoading.set(true);
+        this.errorMessage.set(null);
+
+        this.auth.forgotPassword(email).subscribe({
+            next: (res) => {
+                this.isLoading.set(false);
+                this.successMessage.set(res.message + ' ' + res.contact);
+            },
+            error: (err) => {
+                this.isLoading.set(false);
+                this.errorMessage.set(err.error?.error || 'Failed to process request. Please try again.');
             }
         });
     }

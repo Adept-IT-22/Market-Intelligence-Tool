@@ -372,66 +372,63 @@ export class MainSearchComponent implements AfterViewChecked {
   }
 
   /**
-   * Transforms file references to SharePoint URLs.
+   * Transforms file references to clean filenames.
+   * Strips local machine paths (C:\Users\...) and shows just the filename.
    * Handles multiple formats:
    * 1. Standard markdown: [filename](local_path)
    * 2. Source/Link format: [Source: filename | Link: path]
-   * 3. Removes duplicate filenames before links
+   * 3. Raw paths in text
    */
   private transformReferences(text: string): string {
-    // Base SharePoint URL for the document library
-    const sharepointBase = 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents';
+    let result = text;
 
-    // Local sync folder path (what gets synced to SharePoint)
-    const localBasePath = 'C:\\Users\\imain\\Adept Technologies Ltd\\30. Cloud & Business Automation - Documents';
-    const localBasePathAlt = 'C:/Users/imain/Adept Technologies Ltd/30. Cloud & Business Automation - Documents';
-
-    // Helper function to convert local path to SharePoint URL
-    const toSharePointUrl = (localPath: string): string => {
-      let relativePath = localPath
-        .replace(localBasePath, '')
-        .replace(localBasePathAlt, '')
-        .replace(/\\/g, '/')
-        .replace(/^\//, '');
-
-      const encodedPath = relativePath
-        .split('/')
-        .map((segment: string) => encodeURIComponent(segment))
-        .join('/');
-
-      return `${sharepointBase}/${encodedPath}`;
+    // Helper to extract just the filename from a full path
+    const extractFilename = (path: string): string => {
+      // Handle both forward and backslashes
+      const parts = path.replace(/\\/g, '/').split('/');
+      return parts[parts.length - 1] || path;
     };
 
-    let result = text;
+    // Helper to check if a path is a local Windows path
+    const isLocalPath = (path: string): boolean => {
+      return path.includes('\\') ||
+        path.startsWith('C:') ||
+        path.startsWith('D:') ||
+        path.includes('/Users/') ||
+        path.includes('\\Users\\');
+    };
 
     // Pass 1: Handle [Source: filename | Link: path] format
     result = result.replace(/\[Source:\s*([^|]+)\s*\|\s*Link:\s*([^\]]+)\]/g, (match, filename, localPath) => {
       const trimmedFilename = filename.trim();
-      const trimmedPath = localPath.trim();
-      if (trimmedPath.includes('\\') || trimmedPath.startsWith('C:')) {
-        return `[${trimmedFilename}](${toSharePointUrl(trimmedPath)})`;
-      }
-      return `[${trimmedFilename}](${trimmedPath})`;
+      // Just return the filename as plain text (bold for emphasis)
+      return `**${trimmedFilename}**`;
     });
 
     // Pass 2: Remove duplicate filename that appears before the markdown link
     // Pattern: "filename [filename](path)" -> "[filename](path)"
     result = result.replace(/([^\[\]]+?)\s+\[([^\]]+)\]\(/g, (match, before, inBrackets) => {
-      // Only remove the leading text if it matches the text inside the brackets
       if (before.trim() === inBrackets.trim()) {
         return `[${inBrackets}](`;
       }
       return match;
     });
 
-    // Pass 3: Convert standard markdown local paths to SharePoint URLs
-    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, localPath) => {
-      // Check if this is a local file path
-      if (localPath.includes('\\') || localPath.startsWith('C:')) {
-        return `[${filename}](${toSharePointUrl(localPath)})`;
+    // Pass 3: Convert markdown links with local paths to plain bold text
+    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, path) => {
+      if (isLocalPath(path)) {
+        // Local path - just show the filename as bold text
+        return `**${filename}**`;
       }
-      // Already a URL or not a local path
+      // Keep URLs as-is
       return match;
+    });
+
+    // Pass 4: Clean up any remaining raw paths in the text
+    // Match patterns like C:\Users\...\filename.ext or similar
+    result = result.replace(/[A-Za-z]:\\[^\s\]]+/g, (match) => {
+      const filename = extractFilename(match);
+      return `**${filename}**`;
     });
 
     return result;

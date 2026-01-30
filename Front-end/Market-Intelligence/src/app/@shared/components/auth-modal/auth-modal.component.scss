@@ -73,6 +73,40 @@
             }
         }
 
+        .success-msg {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+            color: #10b981;
+            font-size: 0.85rem;
+            background: rgba(16, 185, 129, 0.1);
+            padding: 0.75rem;
+            border-radius: 8px;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+
+            mat-icon {
+                font-size: 1.25rem;
+                width: 1.25rem;
+                height: 1.25rem;
+                flex-shrink: 0;
+            }
+        }
+
+        .forgot-link {
+            background: none;
+            border: none;
+            color: var(--accent-primary);
+            font-size: 0.85rem;
+            cursor: pointer;
+            padding: 0;
+            text-align: right;
+            margin-top: -0.5rem;
+
+            &:hover {
+                text-decoration: underline;
+            }
+        }
+
         .submit-btn {
             height: 48px;
             font-weight: 600;
