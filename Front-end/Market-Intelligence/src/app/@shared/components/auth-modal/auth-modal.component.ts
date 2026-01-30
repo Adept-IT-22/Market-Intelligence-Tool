@@ -29,7 +29,7 @@ export class AuthModalComponent {
     private auth = inject(AuthService);
     private dialogRef = inject(MatDialogRef<AuthModalComponent>);
 
-    mode = signal<'login' | 'signup' | 'forgot'>('login');
+    mode = signal<'login' | 'signup' | 'forgot' | 'change'>('login');
     isLoading = signal<boolean>(false);
     errorMessage = signal<string | null>(null);
     successMessage = signal<string | null>(null);
@@ -37,8 +37,15 @@ export class AuthModalComponent {
     authForm = this.fb.group({
         email: ['', [Validators.required, Validators.email]],
         password: ['', [Validators.required, Validators.minLength(6)]],
-        displayName: ['']
+        displayName: [''],
+        currentPassword: [''],
+        newPassword: ['']
     });
+
+    // Check if user is logged in (to show change password option)
+    get isLoggedIn(): boolean {
+        return this.auth.isAuthenticated();
+    }
 
     switchMode() {
         this.mode.set(this.mode() === 'login' ? 'signup' : 'login');
@@ -52,6 +59,13 @@ export class AuthModalComponent {
         this.successMessage.set(null);
     }
 
+    showChangePassword() {
+        this.mode.set('change');
+        this.errorMessage.set(null);
+        this.successMessage.set(null);
+        this.authForm.patchValue({ currentPassword: '', newPassword: '' });
+    }
+
     backToLogin() {
         this.mode.set('login');
         this.errorMessage.set(null);
@@ -61,6 +75,11 @@ export class AuthModalComponent {
     onSubmit() {
         if (this.mode() === 'forgot') {
             this.handleForgotPassword();
+            return;
+        }
+
+        if (this.mode() === 'change') {
+            this.handleChangePassword();
             return;
         }
 
@@ -88,23 +107,46 @@ export class AuthModalComponent {
     }
 
     private handleForgotPassword() {
-        const email = this.authForm.get('email')?.value;
-        if (!email) {
-            this.errorMessage.set('Please enter your email address');
+        this.isLoading.set(true);
+        this.errorMessage.set(null);
+
+        this.auth.forgotPassword('').subscribe({
+            next: (res) => {
+                this.isLoading.set(false);
+                this.successMessage.set(res.message + ' Contact: ' + res.contact);
+            },
+            error: (err) => {
+                this.isLoading.set(false);
+                this.errorMessage.set(err.error?.error || 'Failed to process request.');
+            }
+        });
+    }
+
+    private handleChangePassword() {
+        const currentPassword = this.authForm.get('currentPassword')?.value;
+        const newPassword = this.authForm.get('newPassword')?.value;
+
+        if (!currentPassword || !newPassword) {
+            this.errorMessage.set('Please enter both current and new password');
+            return;
+        }
+
+        if (newPassword.length < 6) {
+            this.errorMessage.set('New password must be at least 6 characters');
             return;
         }
 
         this.isLoading.set(true);
         this.errorMessage.set(null);
 
-        this.auth.forgotPassword(email).subscribe({
+        this.auth.changePassword(currentPassword, newPassword).subscribe({
             next: (res) => {
                 this.isLoading.set(false);
-                this.successMessage.set(res.message + ' ' + res.contact);
+                this.successMessage.set(res.message);
             },
             error: (err) => {
                 this.isLoading.set(false);
-                this.errorMessage.set(err.error?.error || 'Failed to process request. Please try again.');
+                this.errorMessage.set(err.error?.error || 'Failed to change password.');
             }
         });
     }

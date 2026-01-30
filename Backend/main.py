@@ -102,22 +102,46 @@ def forgot_password():
     Handle forgot password requests.
     Since no email service is configured, returns contact information.
     """
-    data = request.json
-    email = data.get('email')
-
-    if not email:
-        return jsonify({'error': 'Email is required'}), 400
-
-    # Check if user exists (but don't reveal this to prevent email enumeration)
-    user = get_user_by_email(email)
-    
-    # Always return success message to prevent email enumeration attacks
-    logger.info(f"Password reset requested for: {email}")
-    
     return jsonify({
-        'message': 'If an account exists with this email, password reset instructions have been sent.',
-        'contact': 'For immediate assistance, please contact your system administrator at support@adept.co.ke'
+        'message': 'Please contact your system administrator to reset your password.',
+        'contact': 'support@adept.co.ke'
     }), 200
+
+@app.route('/auth/change-password', methods=['POST'])
+@jwt_required
+def change_password():
+    """
+    Change password for authenticated users.
+    Requires current password verification.
+    """
+    data = request.json
+    current_password = data.get('currentPassword')
+    new_password = data.get('newPassword')
+
+    if not current_password or not new_password:
+        return jsonify({'error': 'Current password and new password are required'}), 400
+
+    if len(new_password) < 6:
+        return jsonify({'error': 'New password must be at least 6 characters'}), 400
+
+    # Get user from database
+    user = get_user_by_id(g.user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    # Verify current password
+    if not verify_password(current_password, user['password_hash']):
+        return jsonify({'error': 'Current password is incorrect'}), 401
+
+    # Update password
+    from models import update_user_password
+    success = update_user_password(g.user_id, hash_password(new_password))
+    
+    if success:
+        logger.info(f"Password changed for user {g.user_id}")
+        return jsonify({'message': 'Password updated successfully'}), 200
+    else:
+        return jsonify({'error': 'Failed to update password'}), 500
 
 # ============== CHAT HISTORY ENDPOINTS ==============
 
