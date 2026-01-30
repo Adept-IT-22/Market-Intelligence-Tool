@@ -96,6 +96,29 @@ def get_me():
         'displayName': user['display_name']
     }}), 200
 
+@app.route('/auth/forgot-password', methods=['POST'])
+def forgot_password():
+    """
+    Handle forgot password requests.
+    Since no email service is configured, returns contact information.
+    """
+    data = request.json
+    email = data.get('email')
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    # Check if user exists (but don't reveal this to prevent email enumeration)
+    user = get_user_by_email(email)
+    
+    # Always return success message to prevent email enumeration attacks
+    logger.info(f"Password reset requested for: {email}")
+    
+    return jsonify({
+        'message': 'If an account exists with this email, password reset instructions have been sent.',
+        'contact': 'For immediate assistance, please contact your system administrator at support@adept.co.ke'
+    }), 200
+
 # ============== CHAT HISTORY ENDPOINTS ==============
 
 @app.route('/chats', methods=['GET'])
