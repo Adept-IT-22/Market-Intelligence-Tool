@@ -223,4 +223,6 @@ qdrant.zip
 *.db
 market-intelligence.db
 Backend/DB/market-intelligence.db
+qdrant_dump.json
+Backend/qdrant_dump.json
 
