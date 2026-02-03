@@ -436,8 +436,9 @@ export class MainSearchComponent implements AfterViewChecked {
         }
       }
 
-      // Fallback: return original path if no mapping found
-      return localPath;
+      // Fallback: no mapping found; avoid exposing local paths
+      console.warn('No SharePoint mapping found for local path:', localPath);
+      return '#'; // Return placeholder to prevent path exposure
     };
 
     // Pass 1: Handle [Source: filename | Link: path] format
