@@ -108,13 +108,6 @@
                 {{ mode() === 'login' ? 'Sign Up' : 'Sign In' }}
             </button>
         </p>
-        @if (mode() === 'login' && isLoggedIn) {
-        <p class="change-pw-link">
-            <button class="link-btn" (click)="showChangePassword()">
-                Change Password
-            </button>
-        </p>
-        }
         }
     </div>
 </div>
