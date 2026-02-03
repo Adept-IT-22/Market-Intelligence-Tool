@@ -415,11 +415,13 @@ class AgentManager:
             "Synthesize the provided data to answer the User Query accurately. "
             "Formatting Rules:\n"
             "1. Use clear, professional Markdown.\n"
-            "2. CITATIONS: You MUST cite sources using Markdown hyperlinks: [Filename](URI).\n"
-            "   - The visible text MUST be a clean filename/title (e.g. 'Project Alpha.pdf').\n"
-            "   - The URI MUST be the full path/link provided in the context.\n"
-            "   - NEVER output internal labels like '[Source: ... | Link: ...]' in the final response.\n"
-            "3. REFERENCES: List all unique sources at the end under a 'References' header using the same [Filename](URI) format.\n"
+            "2. CITATIONS: When citing sources in the text, use this format: **Filename** (bold, no link).\n"
+            "   - Extract ONLY the filename from any paths (e.g., 'C:\\path\\to\\file.pdf' becomes 'file.pdf').\n"
+            "   - Do NOT include the full file path in your response.\n"
+            "3. REFERENCES: At the end, list unique filenames under a 'References' header.\n"
+            "   - Format each as: • **Filename** (bold bullet points).\n"
+            "   - NEVER include full paths like 'C:\\Users\\...' or 'Adept Technologies Ltd\\...'.\n"
+            "   - Show ONLY the clean filename (e.g., 'ProjectSheet.pdf', 'OldMutual.pptx').\n"
         )
         
         user_prompt = f"""
