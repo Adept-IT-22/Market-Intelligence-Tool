@@ -4,7 +4,6 @@
             @switch (mode()) {
             @case ('login') { Welcome Back }
             @case ('signup') { Create Account }
-            @case ('forgot') { Reset Password }
             @case ('change') { Change Password }
             }
         </h2>
@@ -12,7 +11,6 @@
             @switch (mode()) {
             @case ('login') { Sign in to access your chat history }
             @case ('signup') { Join us to persist your research }
-            @case ('forgot') { Contact admin to reset your password }
             @case ('change') { Enter your current and new password }
             }
         </p>
@@ -22,7 +20,7 @@
     </div>
 
     <form [formGroup]="authForm" (ngSubmit)="onSubmit()" class="auth-form">
-        <!-- Email field (login, signup, forgot) -->
+        <!-- Email field (login, signup) -->
         @if (mode() === 'login' || mode() === 'signup') {
         <mat-form-field appearance="outline" subscriptSizing="dynamic">
             <mat-label>Email Address</mat-label>
@@ -64,13 +62,6 @@
         </mat-form-field>
         }
 
-        <!-- Forgot password link (login only) -->
-        @if (mode() === 'login') {
-        <button type="button" class="forgot-link" (click)="showForgotPassword()">
-            Forgot password?
-        </button>
-        }
-
         <!-- Error message -->
         @if (errorMessage()) {
         <div class="error-msg">
@@ -89,12 +80,11 @@
 
         <!-- Submit button -->
         <button mat-flat-button color="primary" class="submit-btn"
-            [disabled]="(mode() !== 'forgot' && mode() !== 'change' && authForm.invalid) || isLoading()">
+            [disabled]="(mode() !== 'change' && authForm.invalid) || isLoading()">
             @if (!isLoading()) {
             @switch (mode()) {
             @case ('login') { Sign In }
             @case ('signup') { Sign Up }
-            @case ('forgot') { Get Help }
             @case ('change') { Update Password }
             }
             } @else {
@@ -104,13 +94,9 @@
     </form>
 
     <div class="modal-footer">
-        @if (mode() === 'forgot' || mode() === 'change') {
+        @if (mode() === 'change') {
         <p>
-            @if (mode() === 'forgot') {
-            Remember your password?
-            } @else {
             Done changing password?
-            }
             <button class="link-btn" (click)="backToLogin()">
                 Back to Sign In
             </button>

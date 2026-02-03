@@ -53,12 +53,6 @@ export class AuthService {
     );
   }
 
-  forgotPassword(email: string) {
-    return this.http.post<{ message: string; contact: string }>(`${environment.apiUrl}/auth/forgot-password`, {
-      email
-    });
-  }
-
   changePassword(currentPassword: string, newPassword: string) {
     return this.http.post<{ message: string }>(`${environment.apiUrl}/auth/change-password`, {
       currentPassword, newPassword
