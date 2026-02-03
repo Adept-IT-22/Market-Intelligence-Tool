@@ -379,10 +379,17 @@ export class MainSearchComponent implements AfterViewChecked {
   private transformReferences(text: string): string {
     let result = text;
 
-    // SharePoint base URL and local sync folder path
-    const sharepointBase = 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents';
-    const localBasePath = 'C:\\Users\\imain\\Adept Technologies Ltd\\30. Cloud & Business Automation - Documents';
-    const localBasePathAlt = 'C:/Users/imain/Adept Technologies Ltd/30. Cloud & Business Automation - Documents';
+    // Common base path for all Adept folders
+    const localUserBase = 'C:\\Users\\imain\\Adept Technologies Ltd\\';
+    const localUserBaseAlt = 'C:/Users/imain/Adept Technologies Ltd/';
+
+    // SharePoint mappings for different folders
+    const sharePointMappings: { [key: string]: string } = {
+      '30. Cloud & Business Automation - Documents': 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents',
+      '03. Marketing - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/03.%20Marketing%20-%20General',
+      '36. BD Collateral - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/36.%20BD%20Collateral%20-%20General',
+      'Innovations - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/Innovations%20-%20General'
+    };
 
     // Helper to extract just the filename from a full path
     const extractFilename = (path: string): string => {
@@ -401,18 +408,36 @@ export class MainSearchComponent implements AfterViewChecked {
 
     // Helper to convert local path to SharePoint URL
     const toSharePointUrl = (localPath: string): string => {
-      let relativePath = localPath
-        .replace(localBasePath, '')
-        .replace(localBasePathAlt, '')
-        .replace(/\\/g, '/')
-        .replace(/^\//, '');
+      // Normalize path
+      let normalizedPath = localPath.replace(/\\/g, '/');
 
-      const encodedPath = relativePath
-        .split('/')
-        .map((segment: string) => encodeURIComponent(segment))
-        .join('/');
+      // Remove the base user path
+      normalizedPath = normalizedPath
+        .replace(localUserBase.replace(/\\/g, '/'), '')
+        .replace(localUserBaseAlt, '');
 
-      return `${sharepointBase}/${encodedPath}`;
+      // Find which SharePoint folder this belongs to
+      for (const [folderName, sharePointBase] of Object.entries(sharePointMappings)) {
+        if (normalizedPath.startsWith(folderName)) {
+          // Extract the relative path after the folder name
+          const relativePath = normalizedPath.substring(folderName.length).replace(/^\//, '');
+
+          if (!relativePath) {
+            return sharePointBase;
+          }
+
+          // Encode each segment
+          const encodedPath = relativePath
+            .split('/')
+            .map((segment: string) => encodeURIComponent(segment))
+            .join('/');
+
+          return `${sharePointBase}/${encodedPath}`;
+        }
+      }
+
+      // Fallback: return original path if no mapping found
+      return localPath;
     };
 
     // Pass 1: Handle [Source: filename | Link: path] format
