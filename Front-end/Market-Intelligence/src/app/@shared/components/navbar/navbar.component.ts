@@ -34,6 +34,16 @@ export class NavbarComponent {
     });
   }
 
+  openChangePassword() {
+    const dialogRef = this.dialog.open(AuthModalComponent, {
+      width: '450px',
+      panelClass: 'auth-dialog'
+    });
+    // Set the modal to change password mode
+    const componentInstance = dialogRef.componentInstance;
+    componentInstance.showChangePassword();
+  }
+
   logout() {
     this.auth.logout();
     window.location.reload(); // Refresh to clear states
