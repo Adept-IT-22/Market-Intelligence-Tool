@@ -372,19 +372,20 @@ export class MainSearchComponent implements AfterViewChecked {
   }
 
   /**
-   * Transforms file references to clean filenames.
-   * Strips local machine paths (C:\Users\...) and shows just the filename.
-   * Handles multiple formats:
-   * 1. Standard markdown: [filename](local_path)
-   * 2. Source/Link format: [Source: filename | Link: path]
-   * 3. Raw paths in text
+   * Transforms file references to SharePoint URLs.
+   * Converts local paths to clickable SharePoint links while keeping clean filenames.
+   * Format: [filename.pdf](C:\...) becomes [filename.pdf](https://sharepoint.com/...)
    */
   private transformReferences(text: string): string {
     let result = text;
 
+    // SharePoint base URL and local sync folder path
+    const sharepointBase = 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents';
+    const localBasePath = 'C:\\Users\\imain\\Adept Technologies Ltd\\30. Cloud & Business Automation - Documents';
+    const localBasePathAlt = 'C:/Users/imain/Adept Technologies Ltd/30. Cloud & Business Automation - Documents';
+
     // Helper to extract just the filename from a full path
     const extractFilename = (path: string): string => {
-      // Handle both forward and backslashes
       const parts = path.replace(/\\/g, '/').split('/');
       return parts[parts.length - 1] || path;
     };
@@ -398,15 +399,35 @@ export class MainSearchComponent implements AfterViewChecked {
         path.includes('\\Users\\');
     };
 
+    // Helper to convert local path to SharePoint URL
+    const toSharePointUrl = (localPath: string): string => {
+      let relativePath = localPath
+        .replace(localBasePath, '')
+        .replace(localBasePathAlt, '')
+        .replace(/\\/g, '/')
+        .replace(/^\//, '');
+
+      const encodedPath = relativePath
+        .split('/')
+        .map((segment: string) => encodeURIComponent(segment))
+        .join('/');
+
+      return `${sharepointBase}/${encodedPath}`;
+    };
+
     // Pass 1: Handle [Source: filename | Link: path] format
     result = result.replace(/\[Source:\s*([^|]+)\s*\|\s*Link:\s*([^\]]+)\]/g, (match, filename, localPath) => {
       const trimmedFilename = filename.trim();
-      // Just return the filename as plain text (bold for emphasis)
-      return `**${trimmedFilename}**`;
+      const cleanPath = localPath.trim();
+
+      if (isLocalPath(cleanPath)) {
+        const sharePointUrl = toSharePointUrl(cleanPath);
+        return `[${trimmedFilename}](${sharePointUrl})`;
+      }
+      return `[${trimmedFilename}](${cleanPath})`;
     });
 
     // Pass 2: Remove duplicate filename that appears before the markdown link
-    // Pattern: "filename [filename](path)" -> "[filename](path)"
     result = result.replace(/([^\[\]]+?)\s+\[([^\]]+)\]\(/g, (match, before, inBrackets) => {
       if (before.trim() === inBrackets.trim()) {
         return `[${inBrackets}](`;
@@ -414,18 +435,17 @@ export class MainSearchComponent implements AfterViewChecked {
       return match;
     });
 
-    // Pass 3: Convert markdown links with local paths to plain bold text
+    // Pass 3: Convert markdown links with local paths to SharePoint URLs
     result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, path) => {
       if (isLocalPath(path)) {
-        // Local path - just show the filename as bold text
-        return `**${filename}**`;
+        const sharePointUrl = toSharePointUrl(path);
+        return `[${filename}](${sharePointUrl})`;
       }
-      // Keep URLs as-is
+      // Keep web URLs as-is
       return match;
     });
 
-    // Pass 4: Clean up any remaining raw paths in the text
-    // Match patterns like C:\Users\...\filename.ext or similar
+    // Pass 4: Clean up any remaining raw paths in the text (convert to bold filenames)
     result = result.replace(/[A-Za-z]:\\[^\s\]]+/g, (match) => {
       const filename = extractFilename(match);
       return `**${filename}**`;
