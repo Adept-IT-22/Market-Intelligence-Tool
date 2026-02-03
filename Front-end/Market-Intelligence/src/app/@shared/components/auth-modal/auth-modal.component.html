@@ -42,8 +42,12 @@
         @if (mode() === 'login' || mode() === 'signup') {
         <mat-form-field appearance="outline" subscriptSizing="dynamic">
             <mat-label>Password</mat-label>
-            <input matInput formControlName="password" type="password" placeholder="Min. 6 characters">
-            <mat-icon matSuffix>lock</mat-icon>
+            <input matInput formControlName="password" [type]="showPassword() ? 'text' : 'password'"
+                placeholder="Min. 6 characters">
+            <button mat-icon-button matSuffix type="button" (click)="showPassword.set(!showPassword())"
+                [attr.aria-label]="'Toggle password visibility'">
+                <mat-icon>{{ showPassword() ? 'visibility_off' : 'visibility' }}</mat-icon>
+            </button>
         </mat-form-field>
         }
 
@@ -51,14 +55,22 @@
         @if (mode() === 'change') {
         <mat-form-field appearance="outline" subscriptSizing="dynamic">
             <mat-label>Current Password</mat-label>
-            <input matInput formControlName="currentPassword" type="password" placeholder="Enter current password">
-            <mat-icon matSuffix>lock</mat-icon>
+            <input matInput formControlName="currentPassword" [type]="showCurrentPassword() ? 'text' : 'password'"
+                placeholder="Enter current password">
+            <button mat-icon-button matSuffix type="button" (click)="showCurrentPassword.set(!showCurrentPassword())"
+                [attr.aria-label]="'Toggle current password visibility'">
+                <mat-icon>{{ showCurrentPassword() ? 'visibility_off' : 'visibility' }}</mat-icon>
+            </button>
         </mat-form-field>
 
         <mat-form-field appearance="outline" subscriptSizing="dynamic">
             <mat-label>New Password</mat-label>
-            <input matInput formControlName="newPassword" type="password" placeholder="Min. 6 characters">
-            <mat-icon matSuffix>lock_reset</mat-icon>
+            <input matInput formControlName="newPassword" [type]="showNewPassword() ? 'text' : 'password'"
+                placeholder="Min. 6 characters">
+            <button mat-icon-button matSuffix type="button" (click)="showNewPassword.set(!showNewPassword())"
+                [attr.aria-label]="'Toggle new password visibility'">
+                <mat-icon>{{ showNewPassword() ? 'visibility_off' : 'visibility' }}</mat-icon>
+            </button>
         </mat-form-field>
         }
 
