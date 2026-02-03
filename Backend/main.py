@@ -96,17 +96,6 @@ def get_me():
         'displayName': user['display_name']
     }}), 200
 
-@app.route('/auth/forgot-password', methods=['POST'])
-def forgot_password():
-    """
-    Handle forgot password requests.
-    Since no email service is configured, returns contact information.
-    """
-    return jsonify({
-        'message': 'Please contact your system administrator to reset your password.',
-        'contact': 'support@adept.co.ke'
-    }), 200
-
 @app.route('/auth/change-password', methods=['POST'])
 @jwt_required
 def change_password():

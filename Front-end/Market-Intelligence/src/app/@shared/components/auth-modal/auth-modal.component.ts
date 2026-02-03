@@ -29,7 +29,7 @@ export class AuthModalComponent {
     private auth = inject(AuthService);
     private dialogRef = inject(MatDialogRef<AuthModalComponent>);
 
-    mode = signal<'login' | 'signup' | 'forgot' | 'change'>('login');
+    mode = signal<'login' | 'signup' | 'change'>('login');
     isLoading = signal<boolean>(false);
     errorMessage = signal<string | null>(null);
     successMessage = signal<string | null>(null);
@@ -53,12 +53,6 @@ export class AuthModalComponent {
         this.successMessage.set(null);
     }
 
-    showForgotPassword() {
-        this.mode.set('forgot');
-        this.errorMessage.set(null);
-        this.successMessage.set(null);
-    }
-
     showChangePassword() {
         this.mode.set('change');
         this.errorMessage.set(null);
@@ -73,11 +67,6 @@ export class AuthModalComponent {
     }
 
     onSubmit() {
-        if (this.mode() === 'forgot') {
-            this.handleForgotPassword();
-            return;
-        }
-
         if (this.mode() === 'change') {
             this.handleChangePassword();
             return;
@@ -102,22 +91,6 @@ export class AuthModalComponent {
             error: (err) => {
                 this.isLoading.set(false);
                 this.errorMessage.set(err.error?.error || 'Authentication failed. Please try again.');
-            }
-        });
-    }
-
-    private handleForgotPassword() {
-        this.isLoading.set(true);
-        this.errorMessage.set(null);
-
-        this.auth.forgotPassword('').subscribe({
-            next: (res) => {
-                this.isLoading.set(false);
-                this.successMessage.set(res.message + ' Contact: ' + res.contact);
-            },
-            error: (err) => {
-                this.isLoading.set(false);
-                this.errorMessage.set(err.error?.error || 'Failed to process request.');
             }
         });
     }
