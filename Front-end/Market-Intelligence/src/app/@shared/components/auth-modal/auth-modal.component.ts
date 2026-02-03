@@ -114,6 +114,12 @@ export class AuthModalComponent {
             return;
         }
 
+        // Check if new password is same as current
+        if (currentPassword === newPassword) {
+            this.errorMessage.set('New password must be different from current password');
+            return;
+        }
+
         this.isLoading.set(true);
         this.errorMessage.set(null);
 
@@ -121,6 +127,11 @@ export class AuthModalComponent {
             next: (res) => {
                 this.isLoading.set(false);
                 this.successMessage.set(res.message);
+
+                // Auto-close modal after 2.5 seconds
+                setTimeout(() => {
+                    this.dialogRef.close();
+                }, 2500);
             },
             error: (err) => {
                 this.isLoading.set(false);

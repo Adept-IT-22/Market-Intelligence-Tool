@@ -10,7 +10,7 @@ from models import (
     init_chat_tables, create_user, get_user_by_email, get_user_by_id,
     create_chat_session, get_user_chat_sessions, get_chat_session,
     update_chat_session_title, delete_chat_session,
-    add_chat_message, get_chat_messages
+    add_chat_message, get_chat_messages, update_user_password
 )
 from auth import hash_password, verify_password, create_token, jwt_required, jwt_optional
 
