@@ -34,6 +34,11 @@ export class AuthModalComponent {
     errorMessage = signal<string | null>(null);
     successMessage = signal<string | null>(null);
 
+    // Password visibility toggles
+    showPassword = signal<boolean>(false);
+    showCurrentPassword = signal<boolean>(false);
+    showNewPassword = signal<boolean>(false);
+
     authForm = this.fb.group({
         email: ['', [Validators.required, Validators.email]],
         password: ['', [Validators.required, Validators.minLength(6)]],
