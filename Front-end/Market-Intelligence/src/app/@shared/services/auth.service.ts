@@ -53,6 +53,14 @@ export class AuthService {
     );
   }
 
+  changePassword(currentPassword: string, newPassword: string) {
+    return this.http.post<{ message: string }>(`${environment.apiUrl}/auth/change-password`, {
+      currentPassword, newPassword
+    }, {
+      headers: { 'Authorization': `Bearer ${this.getToken()}` }
+    });
+  }
+
   logout() {
     localStorage.removeItem(this.TOKEN_KEY);
     this.currentUser.set(null);

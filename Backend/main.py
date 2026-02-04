@@ -10,7 +10,7 @@ from models import (
     init_chat_tables, create_user, get_user_by_email, get_user_by_id,
     create_chat_session, get_user_chat_sessions, get_chat_session,
     update_chat_session_title, delete_chat_session,
-    add_chat_message, get_chat_messages
+    add_chat_message, get_chat_messages, update_user_password
 )
 from auth import hash_password, verify_password, create_token, jwt_required, jwt_optional
 
@@ -95,6 +95,42 @@ def get_me():
         'email': user['email'],
         'displayName': user['display_name']
     }}), 200
+
+@app.route('/auth/change-password', methods=['POST'])
+@jwt_required
+def change_password():
+    """
+    Change password for authenticated users.
+    Requires current password verification.
+    """
+    data = request.json
+    current_password = data.get('currentPassword')
+    new_password = data.get('newPassword')
+
+    if not current_password or not new_password:
+        return jsonify({'error': 'Current password and new password are required'}), 400
+
+    if len(new_password) < 6:
+        return jsonify({'error': 'New password must be at least 6 characters'}), 400
+
+    # Get user from database
+    user = get_user_by_id(g.user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    # Verify current password
+    if not verify_password(current_password, user['password_hash']):
+        return jsonify({'error': 'Current password is incorrect'}), 401
+
+    # Update password
+    from models import update_user_password
+    success = update_user_password(g.user_id, hash_password(new_password))
+    
+    if success:
+        logger.info(f"Password changed for user {g.user_id}")
+        return jsonify({'message': 'Password updated successfully'}), 200
+    else:
+        return jsonify({'error': 'Failed to update password'}), 500
 
 # ============== CHAT HISTORY ENDPOINTS ==============
 

@@ -86,13 +86,26 @@ def get_user_by_email(email: str) -> dict:
     return dict(row) if row else None
 
 def get_user_by_id(user_id: int) -> dict:
-    """Get user by ID."""
+    """Get user by ID (including password_hash for auth operations)."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, email, display_name, created_at FROM users WHERE id = ?', (user_id,))
+    cursor.execute('SELECT id, email, display_name, password_hash, created_at FROM users WHERE id = ?', (user_id,))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
+
+def update_user_password(user_id: int, new_password_hash: str) -> bool:
+    """Update user's password hash."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'UPDATE users SET password_hash = ? WHERE id = ?',
+        (new_password_hash, user_id)
+    )
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
 
 # Chat session CRUD operations
 def create_chat_session(user_id: int, title: str = "New Chat") -> int:

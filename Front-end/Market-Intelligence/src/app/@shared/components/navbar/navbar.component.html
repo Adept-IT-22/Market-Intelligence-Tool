@@ -43,6 +43,10 @@
 
                 <!-- Footer: Functional Action -->
                 <div class="menu-footer">
+                    <button mat-menu-item (click)="openChangePassword()" class="change-password-item">
+                        <mat-icon>lock_reset</mat-icon>
+                        <span>Change Password</span>
+                    </button>
                     <button mat-menu-item (click)="logout()" class="logout-item">
                         <mat-icon>logout</mat-icon>
                         <span>Sign Out</span>

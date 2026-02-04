@@ -29,22 +29,54 @@ export class AuthModalComponent {
     private auth = inject(AuthService);
     private dialogRef = inject(MatDialogRef<AuthModalComponent>);
 
-    mode = signal<'login' | 'signup'>('login');
+    mode = signal<'login' | 'signup' | 'change'>('login');
     isLoading = signal<boolean>(false);
     errorMessage = signal<string | null>(null);
+    successMessage = signal<string | null>(null);
+
+    // Password visibility toggles
+    showPassword = signal<boolean>(false);
+    showCurrentPassword = signal<boolean>(false);
+    showNewPassword = signal<boolean>(false);
 
     authForm = this.fb.group({
         email: ['', [Validators.required, Validators.email]],
         password: ['', [Validators.required, Validators.minLength(6)]],
-        displayName: ['']
+        displayName: [''],
+        currentPassword: [''],
+        newPassword: ['']
     });
+
+    // Check if user is logged in (to show change password option)
+    get isLoggedIn(): boolean {
+        return this.auth.isAuthenticated();
+    }
 
     switchMode() {
         this.mode.set(this.mode() === 'login' ? 'signup' : 'login');
         this.errorMessage.set(null);
+        this.successMessage.set(null);
+    }
+
+    showChangePassword() {
+        this.mode.set('change');
+        this.errorMessage.set(null);
+        this.successMessage.set(null);
+        this.authForm.patchValue({ currentPassword: '', newPassword: '' });
+    }
+
+    backToLogin() {
+        this.mode.set('login');
+        this.errorMessage.set(null);
+        this.successMessage.set(null);
     }
 
     onSubmit() {
+        if (this.mode() === 'change') {
+            this.handleChangePassword();
+            return;
+        }
+
         if (this.authForm.invalid) return;
 
         this.isLoading.set(true);
@@ -64,6 +96,46 @@ export class AuthModalComponent {
             error: (err) => {
                 this.isLoading.set(false);
                 this.errorMessage.set(err.error?.error || 'Authentication failed. Please try again.');
+            }
+        });
+    }
+
+    private handleChangePassword() {
+        const currentPassword = this.authForm.get('currentPassword')?.value;
+        const newPassword = this.authForm.get('newPassword')?.value;
+
+        if (!currentPassword || !newPassword) {
+            this.errorMessage.set('Please enter both current and new password');
+            return;
+        }
+
+        if (newPassword.length < 6) {
+            this.errorMessage.set('New password must be at least 6 characters');
+            return;
+        }
+
+        // Check if new password is same as current
+        if (currentPassword === newPassword) {
+            this.errorMessage.set('New password must be different from current password');
+            return;
+        }
+
+        this.isLoading.set(true);
+        this.errorMessage.set(null);
+
+        this.auth.changePassword(currentPassword, newPassword).subscribe({
+            next: (res) => {
+                this.isLoading.set(false);
+                this.successMessage.set(res.message);
+
+                // Auto-close modal after 2.5 seconds
+                setTimeout(() => {
+                    this.dialogRef.close();
+                }, 2500);
+            },
+            error: (err) => {
+                this.isLoading.set(false);
+                this.errorMessage.set(err.error?.error || 'Failed to change password.');
             }
         });
     }
