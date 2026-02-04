@@ -373,65 +373,108 @@ export class MainSearchComponent implements AfterViewChecked {
 
   /**
    * Transforms file references to SharePoint URLs.
-   * Handles multiple formats:
-   * 1. Standard markdown: [filename](local_path)
-   * 2. Source/Link format: [Source: filename | Link: path]
-   * 3. Removes duplicate filenames before links
+   * Converts local paths to clickable SharePoint links while keeping clean filenames.
+   * Format: [filename.pdf](C:\...) becomes [filename.pdf](https://sharepoint.com/...)
    */
   private transformReferences(text: string): string {
-    // Base SharePoint URL for the document library
-    const sharepointBase = 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents';
+    let result = text;
 
-    // Local sync folder path (what gets synced to SharePoint)
-    const localBasePath = 'C:\\Users\\imain\\Adept Technologies Ltd\\30. Cloud & Business Automation - Documents';
-    const localBasePathAlt = 'C:/Users/imain/Adept Technologies Ltd/30. Cloud & Business Automation - Documents';
+    // Common base path for all Adept folders
+    const localUserBase = 'C:\\Users\\imain\\Adept Technologies Ltd\\';
+    const localUserBaseAlt = 'C:/Users/imain/Adept Technologies Ltd/';
 
-    // Helper function to convert local path to SharePoint URL
-    const toSharePointUrl = (localPath: string): string => {
-      let relativePath = localPath
-        .replace(localBasePath, '')
-        .replace(localBasePathAlt, '')
-        .replace(/\\/g, '/')
-        .replace(/^\//, '');
-
-      const encodedPath = relativePath
-        .split('/')
-        .map((segment: string) => encodeURIComponent(segment))
-        .join('/');
-
-      return `${sharepointBase}/${encodedPath}`;
+    // SharePoint mappings for different folders
+    const sharePointMappings: { [key: string]: string } = {
+      '30. Cloud & Business Automation - Documents': 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents',
+      '03. Marketing - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/03.%20Marketing%20-%20General',
+      '36. BD Collateral - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/36.%20BD%20Collateral%20-%20General',
+      'Innovations - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/Innovations%20-%20General'
     };
 
-    let result = text;
+    // Helper to extract just the filename from a full path
+    const extractFilename = (path: string): string => {
+      const parts = path.replace(/\\/g, '/').split('/');
+      return parts[parts.length - 1] || path;
+    };
+
+    // Helper to check if a path is a local Windows path
+    const isLocalPath = (path: string): boolean => {
+      return path.includes('\\') ||
+        path.startsWith('C:') ||
+        path.startsWith('D:') ||
+        path.includes('/Users/') ||
+        path.includes('\\Users\\');
+    };
+
+    // Helper to convert local path to SharePoint URL
+    const toSharePointUrl = (localPath: string): string => {
+      // Normalize path
+      let normalizedPath = localPath.replace(/\\/g, '/');
+
+      // Remove the base user path
+      normalizedPath = normalizedPath
+        .replace(localUserBase.replace(/\\/g, '/'), '')
+        .replace(localUserBaseAlt, '');
+
+      // Find which SharePoint folder this belongs to
+      for (const [folderName, sharePointBase] of Object.entries(sharePointMappings)) {
+        if (normalizedPath.startsWith(folderName)) {
+          // Extract the relative path after the folder name
+          const relativePath = normalizedPath.substring(folderName.length).replace(/^\//, '');
+
+          if (!relativePath) {
+            return sharePointBase;
+          }
+
+          // Encode each segment
+          const encodedPath = relativePath
+            .split('/')
+            .map((segment: string) => encodeURIComponent(segment))
+            .join('/');
+
+          return `${sharePointBase}/${encodedPath}`;
+        }
+      }
+
+      // Fallback: no mapping found; avoid exposing local paths
+      console.warn('No SharePoint mapping found for local path:', localPath);
+      return '#'; // Return placeholder to prevent path exposure
+    };
 
     // Pass 1: Handle [Source: filename | Link: path] format
     result = result.replace(/\[Source:\s*([^|]+)\s*\|\s*Link:\s*([^\]]+)\]/g, (match, filename, localPath) => {
       const trimmedFilename = filename.trim();
-      const trimmedPath = localPath.trim();
-      if (trimmedPath.includes('\\') || trimmedPath.startsWith('C:')) {
-        return `[${trimmedFilename}](${toSharePointUrl(trimmedPath)})`;
+      const cleanPath = localPath.trim();
+
+      if (isLocalPath(cleanPath)) {
+        const sharePointUrl = toSharePointUrl(cleanPath);
+        return `[${trimmedFilename}](${sharePointUrl})`;
       }
-      return `[${trimmedFilename}](${trimmedPath})`;
+      return `[${trimmedFilename}](${cleanPath})`;
     });
 
     // Pass 2: Remove duplicate filename that appears before the markdown link
-    // Pattern: "filename [filename](path)" -> "[filename](path)"
     result = result.replace(/([^\[\]]+?)\s+\[([^\]]+)\]\(/g, (match, before, inBrackets) => {
-      // Only remove the leading text if it matches the text inside the brackets
       if (before.trim() === inBrackets.trim()) {
         return `[${inBrackets}](`;
       }
       return match;
     });
 
-    // Pass 3: Convert standard markdown local paths to SharePoint URLs
-    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, localPath) => {
-      // Check if this is a local file path
-      if (localPath.includes('\\') || localPath.startsWith('C:')) {
-        return `[${filename}](${toSharePointUrl(localPath)})`;
+    // Pass 3: Convert markdown links with local paths to SharePoint URLs
+    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, path) => {
+      if (isLocalPath(path)) {
+        const sharePointUrl = toSharePointUrl(path);
+        return `[${filename}](${sharePointUrl})`;
       }
-      // Already a URL or not a local path
+      // Keep web URLs as-is
       return match;
+    });
+
+    // Pass 4: Clean up any remaining raw Windows-style paths in the text (convert to bold filenames)
+    result = result.replace(/[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*/g, (match) => {
+      const filename = extractFilename(match);
+      return `**${filename}**`;
     });
 
     return result;

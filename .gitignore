@@ -218,3 +218,11 @@ qdrant.zip
 # Project Metadata
 .gemini/
 .agent/
+
+# Database
+*.db
+market-intelligence.db
+Backend/DB/market-intelligence.db
+qdrant_dump.json
+Backend/qdrant_dump.json
+
