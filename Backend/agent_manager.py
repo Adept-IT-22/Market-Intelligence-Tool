@@ -136,7 +136,40 @@ class AgentManager:
                 candidate_routing_tables.add(rt)
         
         if not candidate_routing_tables:
-            logger.warning("No candidate routing tables found via semantic search.")
+            logger.info("No semantic candidates found. Falling back to keyword search.")
+
+        # 1.5 Keyword Search Backup
+        # If the user asks for a specific file by name (e.g. "Client Stories"), 
+        # we should search the Master Title directly.
+        
+        # Simple keyword extraction: remove Stopwords (rudimentary)
+        stopwords = {'the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'about'}
+        keywords = [w for w in self.query.lower().split() if w.isalnum() and w not in stopwords]
+        
+        keyword_candidates = set()
+        if keywords:
+            conn = sqlite3.connect(self.database_path)
+            # Find any Master entry where Title contains ANY relevant keyword
+            # We limit this to avoid exploding context - say top 5 matches
+            try:
+                # Dynamically build WHERE clause
+                conditions = " OR ".join([f"Title LIKE ?" for _ in keywords])
+                params = [f"%{k}%" for k in keywords]
+                query = f"SELECT table_name FROM Master WHERE {conditions} LIMIT 5"
+                
+                df_kw = pd.read_sql_query(query, conn, params=params)
+                for table in df_kw['table_name'].tolist():
+                    keyword_candidates.add(table)
+            except Exception as e:
+                logger.warning(f"Keyword search failed: {e}")
+            conn.close()
+        
+        # Combine Semantic + Keyword candidates
+        candidate_routing_tables.update(keyword_candidates)
+        logger.info(f"Combined Candidates (Semantic + Keyword): {candidate_routing_tables}")
+
+        if not candidate_routing_tables:
+            logger.warning("No candidate routing tables found via semantic or keyword search.")
             return []
 
         # 2. Fetch only the relevant Master entries
