@@ -152,14 +152,26 @@ class AgentManager:
             # Find any Master entry where Title contains ANY relevant keyword
             # We limit this to avoid exploding context - say top 5 matches
             try:
-                # Dynamically build WHERE clause
-                conditions = " OR ".join([f"Title LIKE ?" for _ in keywords])
+                # Improved Keyword Search: Rank by number of match hits
+                # We build a query that counts how many keywords appear in the title
+                match_scores = " + ".join([f"(case when Title LIKE ? then 1 else 0 end)" for _ in keywords])
                 params = [f"%{k}%" for k in keywords]
-                query = f"SELECT table_name FROM Master WHERE {conditions} LIMIT 5"
+                # Filter to only rows that have at least one match
+                conditions = " OR ".join([f"Title LIKE ?" for _ in keywords])
+                params_full = params + params
                 
-                df_kw = pd.read_sql_query(query, conn, params=params)
+                query = f"""
+                    SELECT table_name, ({match_scores}) as score 
+                    FROM Master 
+                    WHERE {conditions} 
+                    ORDER BY score DESC 
+                    LIMIT 10
+                """
+                
+                df_kw = pd.read_sql_query(query, conn, params=params_full)
                 for table in df_kw['table_name'].tolist():
                     keyword_candidates.add(table)
+                logger.info(f"Keyword search found {len(keyword_candidates)} candidates: {df_kw.to_dict(orient='records')}")
             except Exception as e:
                 logger.warning(f"Keyword search failed: {e}")
             conn.close()
