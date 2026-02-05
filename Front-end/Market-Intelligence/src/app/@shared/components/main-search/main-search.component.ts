@@ -471,8 +471,8 @@ export class MainSearchComponent implements AfterViewChecked {
       return match;
     });
 
-    // Pass 4: Clean up any remaining raw paths in the text (convert to bold filenames)
-    result = result.replace(/[A-Za-z]:\\[^\s\]]+/g, (match) => {
+    // Pass 4: Clean up any remaining raw Windows-style paths in the text (convert to bold filenames)
+    result = result.replace(/[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*/g, (match) => {
       const filename = extractFilename(match);
       return `**${filename}**`;
     });
