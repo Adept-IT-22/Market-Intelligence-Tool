@@ -370,7 +370,31 @@ class AgentManager:
 
                     source_name = self._get_display_name(source_link)
                     df = pd.read_sql_query(f'SELECT * FROM "{table}" LIMIT 10', conn) # Limit rows
-                    table_text = f"\n---\nSource: {source_name} (URI: {source_link})\nData:\n{df.to_string(index=False)}\n"
+                    
+                    # --- NEW: Hybrid Retrieval (SQL -> Qdrant) ---
+                    # If this table contains pointers to Qdrant (qdrant_point_id),
+                    # we must fetch the actual text content from Qdrant.
+                    fetched_text_content = []
+                    if 'qdrant_point_id' in df.columns:
+                        ids_to_fetch = [uuid for uuid in df['qdrant_point_id'].dropna().tolist() if uuid]
+                        if ids_to_fetch:
+                             try:
+                                 points = self.qdrant_client.retrieve(
+                                     collection_name=self.collection_name,
+                                     ids=ids_to_fetch
+                                 )
+                                 for p in points:
+                                     txt = p.payload.get('text', '')
+                                     if txt: fetched_text_content.append(f"[Content from Point {p.id}]:\n{txt}")
+                             except Exception as q_err:
+                                 logger.error(f"Failed to hydrate Qdrant points for table {table}: {q_err}")
+
+                    # Append hydrated text to the dataframe display
+                    table_str = df.to_string(index=False)
+                    if fetched_text_content:
+                        table_str += "\n\n--- Hydrated Vector Content ---\n" + "\n".join(fetched_text_content)
+
+                    table_text = f"\n---\nSource: {source_name} (URI: {source_link})\nData:\n{table_str}\n"
                     
                     if len(context) + len(table_text) > max_chars:
                         context += table_text[:max_chars - len(context)] + "...[Truncated]"
