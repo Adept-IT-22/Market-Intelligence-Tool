@@ -255,7 +255,7 @@ class AgentManager:
 
         conn = sqlite3.connect(self.database_path)
         combined_routing_sections = []
-        max_total_chars = 20000 
+        max_total_chars = 15000 # Reduced from 20000 to avoid Groq 6000 token limit
         current_length = 0
         
         for r_table in routing_tables:
