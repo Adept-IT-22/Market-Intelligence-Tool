@@ -226,3 +226,20 @@ Backend/DB/market-intelligence.db
 qdrant_dump.json
 Backend/qdrant_dump.json
 
+# Snapshots and Data
+Backend/snapshots/
+Backend/uploads/
+*.snapshot
+*.zip
+
+# Temporary Scripts & Logs
+Backend/migrate_vectors.py
+Backend/reindex_draft.py
+Backend/restore_retry.py
+Backend/backup_qdrant.py
+Backend/dump_qdrant_to_json.py
+Backend/import_qdrant_from_json.py
+Backend/test_agent_manager.py
+DEPLOY_COMMANDS.txt
+administrator@192.168.1.250
+

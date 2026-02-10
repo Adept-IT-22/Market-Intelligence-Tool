@@ -14,8 +14,13 @@ A high-performance, AI-driven analytics platform designed to provide deep insigh
 ### 🚀 Performance & Intelligence
 - **Ultra-Fast Inference**: Integrated with **Groq** using `llama-3.1-8b-instant` for sub-second response times.
 - **Retrieval Augmented Generation (RAG)**: Uses **Qdrant** vector database to ground AI responses in actual market intelligence documents.
+- **Hybrid Retrieval Logic**: A sophisticated 3-level filtering system:
+  1. **Master Routing**: High-level semantic + keyword search across document titles.
+  2. **Vector Hydration**: Automatically resolves SQL pointers (UUIDs) to full text payloads in Qdrant.
+  3. **Context Synthesis**: Intelligent prompt engineering that prioritizes precise data segments.
 - **Optimized Pipeline**: A consolidated agent architecture that minimizes LLM calls and maximizes throughput.
-- **Smart Routing**: Hybrid retrieval logic that combines structured SQL data with unstructured vector context.
+- **Smart Routing**: Combines structured SQL data with unstructured vector context.
+- **Auto-Ingestion**: Supports remote file ingestion from SharePoint via **Power Automate** and **ngrok**. (See [POWER_AUTOMATE_GUIDE.md](./POWER_AUTOMATE_GUIDE.md))
 
 ### 🎨 Premium UI/UX
 - **Threaded Chat Tree**: Visual conversation history connecting user queries and AI responses with threaded connectors.
@@ -56,7 +61,7 @@ Create a `.env` file in the `Backend` directory:
 ```env
 GROQ_API_KEY=your_groq_api_key
 QDRANT_HOST=localhost
-QDRANT_PORT=7000
+
 ```
 Run the backend:
 ```bash
@@ -77,6 +82,27 @@ Ensure Qdrant is running on port 7000. To populate the vector store with your lo
 cd Backend
 python setup_qdrant.py
 ```
+
+---
+
+## 🌐 Deployment (Staging Server)
+
+The application is deployed via Docker Compose on the staging server (`192.168.1.250`).
+
+### Access
+- **Frontend**: `http://192.168.1.250:8080`
+- **Backend API**: `http://192.168.1.250:8000`
+
+### Updating Code
+To push local changes to the staging server:
+1. **Push to GitHub**: `git push origin dev`
+2. **Pull on Server**: `ssh administrator@192.168.1.250 "cd ~/mkt-int/Market-Intelligence-Tool && git pull origin dev"`
+3. **Restart Service**: `ssh administrator@192.168.1.250 "cd ~/mkt-int/Market-Intelligence-Tool && docker compose restart backend"`
+
+### Data Sync (Local -> Server)
+If you ingest new data locally and want to sync it:
+1. **Migrate Vectors**: Run `Backend/migrate_vectors.py` (requires SSH tunnel to port 16333).
+2. **Upload Database**: `scp Backend/DB/market-intelligence.db administrator@192.168.1.250:~/mkt-int/Market-Intelligence-Tool/Backend/DB/`
 
 ---
 

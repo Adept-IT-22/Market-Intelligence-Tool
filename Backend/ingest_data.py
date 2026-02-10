@@ -97,7 +97,7 @@ class DataIngester:
             input_path = os.path.abspath(input_path)
 
         # Validate Input BEFORE creating Master entry
-        supported_types = ['excel', 'pdf', 'url', 'docx', 'pptx', 'image']
+        supported_types = ['excel', 'pdf', 'url', 'docx', 'pptx', 'image', 'md']
         st_lower = source_type.lower()
         if st_lower not in supported_types:
              logger.error(f"Unsupported source type: {source_type}")
@@ -128,6 +128,8 @@ class DataIngester:
                 self._process_pptx(input_path, master_id, routing_table_name, sectors)
             elif st_lower == 'image' or input_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
                 self._process_image(input_path, master_id, routing_table_name, sectors)
+            elif st_lower == 'md' or input_path.endswith('.md'):
+                self._process_md(input_path, master_id, routing_table_name, sectors)
             
             self.summary_report["success"].append(input_path)
             logger.info("Ingestion Complete.")
@@ -310,6 +312,19 @@ class DataIngester:
             logger.error(f"URL processing failed for {url}: {e}")
             raise e
     
+    def _process_md(self, file_path, master_id, routing_table_name, sectors):
+        """Process Markdown files by reading as plain text."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+            if not text.strip():
+                logger.warning(f"Skipping empty MD file: {file_path}")
+                return
+            self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, "Markdown Content")
+            self.conn.commit()
+        except Exception as e:
+            logger.error(f"MD processing failed for {file_path}: {e}")
+            raise e
 
 
     def _process_image(self, file_path, master_id, routing_table_name, sectors):
@@ -394,7 +409,7 @@ class DataIngester:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest data into Market Intelligence V2 Ecosystem")
     parser.add_argument("--input", required=True, help="Path to file, directory, or URL")
-    parser.add_argument("--type", choices=['excel', 'pdf', 'url', 'docx', 'pptx', 'image', 'auto'], default='auto', help="Type of input data")
+    parser.add_argument("--type", choices=['excel', 'pdf', 'url', 'docx', 'pptx', 'image', 'md', 'auto'], default='auto', help="Type of input data")
     parser.add_argument("--title", help="Title for the dataset")
     parser.add_argument("--sectors", default="General", help="Comma-separated sectors")
     parser.add_argument("--summary", default="", help="Brief summary of the data")
@@ -412,6 +427,7 @@ if __name__ == "__main__":
                 elif ext == '.pdf': f_type = 'pdf'
                 elif ext == '.docx': f_type = 'docx'
                 elif ext == '.pptx': f_type = 'pptx'
+                elif ext == '.md': f_type = 'md'
                 elif ext in ['.png', '.jpg', '.jpeg', '.webp']: f_type = 'image'
                 
                 if f_type:
@@ -433,6 +449,7 @@ if __name__ == "__main__":
             '.pdf': 'pdf', 
             '.docx': 'docx', 
             '.pptx': 'pptx',
+            '.md': 'md',
             '.png': 'image', '.jpg': 'image', '.jpeg': 'image', '.webp': 'image'
         }
         f_type = args.type
