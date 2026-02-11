@@ -139,40 +139,45 @@ async def _call_gemini_api_internal(prompt: str) -> str:
         },
     }
     async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(VERTEX_ENDPOINT, headers=headers, json=payload)
-        
         try:
-            response_data = response.json()
+            response = await client.post(VERTEX_ENDPOINT, headers=headers, json=payload)
+            
+            try:
+                response_data = response.json()
+            except Exception as e:
+                logger.error(f"Failed to parse Gemini response as JSON. Status: {response.status_code}, Error: {e}, Payload: {response.text[:500]}")
+                response.raise_for_status()
+                raise ValueError(f"Gemini returned non-JSON response: {response.text[:500]}")
+            
+            if response.status_code != 200:
+                logger.warning(f"Gemini API returned {response.status_code}: {response_data}")
+                response.raise_for_status()
+                
+            # Robust parsing of candidates
+            candidates = response_data.get("candidates", [])
+            if not candidates:
+                # Check for blocking reasons
+                prompt_feedback = response_data.get("promptFeedback", {})
+                if prompt_feedback:
+                    logger.error(f"Gemini Prompt Blocked: {prompt_feedback}")
+                    return "UNAVAILABLE: The query prompt was blocked by Gemini safety filters."
+                
+                # If it's not blocked but empty, it might be a transient API weirdness
+                logger.warning(f"Gemini returned no candidates. Full response: {response_data}")
+                raise ValueError(f"Gemini returned empty candidates list (no feedback reason). Response: {response_data}")
+            
+            candidate = candidates[0]
+            content = candidate.get("content")
+            if not content or "parts" not in content:
+                finish_reason = candidate.get("finishReason")
+                logger.error(f"Gemini content empty (Reason: {finish_reason}). Full Candidate: {candidate}")
+                return f"UNAVAILABLE: Gemini blocked the response generation. Reason: {finish_reason}"
+                
+            return content["parts"][0]["text"]
+            
         except Exception as e:
-            logger.error(f"Failed to parse Gemini response as JSON. Status: {response.status_code}, Error: {e}, Payload: {response.text[:500]}")
-            response.raise_for_status()
-            raise ValueError(f"Gemini returned non-JSON response: {response.text[:500]}")
-        
-        if response.status_code != 200:
-            logger.warning(f"Gemini API returned {response.status_code}: {response_data}")
-            response.raise_for_status()
-            
-        # Robust parsing of candidates
-        candidates = response_data.get("candidates", [])
-        if not candidates:
-            # Check for blocking reasons
-            prompt_feedback = response_data.get("promptFeedback", {})
-            if prompt_feedback:
-                logger.error(f"Gemini Prompt Blocked: {prompt_feedback}")
-                return "UNAVAILABLE: The query prompt was blocked by Gemini safety filters."
-            
-            # If it's not blocked but empty, it might be a transient API weirdness
-            logger.warning(f"Gemini returned no candidates. Full response: {response_data}")
-            raise ValueError(f"Gemini returned empty candidates list (no feedback reason). Response: {response_data}")
-        
-        candidate = candidates[0]
-        content = candidate.get("content")
-        if not content or "parts" not in content:
-            finish_reason = candidate.get("finishReason")
-            logger.error(f"Gemini content empty (Reason: {finish_reason}). Full Candidate: {candidate}")
-            return f"UNAVAILABLE: Gemini blocked the response generation. Reason: {finish_reason}"
-            
-        return content["parts"][0]["text"]
+            logger.error(f"FATAL ERROR in _call_gemini_api_internal: {type(e).__name__}: {e}")
+            raise
 
 async def call_gemini_async(prompt: str) -> str:
     global last_call
