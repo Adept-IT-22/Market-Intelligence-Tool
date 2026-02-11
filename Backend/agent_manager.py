@@ -23,9 +23,15 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # --- Vertex AI / Gemini Configuration ---
+# DO NOT hardcode Project IDs here. Ensure these are set in your .env file on Staging.
 PROJECT_ID = os.getenv("GCP_PROJECT_ID")
 REGION = os.getenv("GCP_REGION", "us-central1")
 GEMINI_MODEL_NAME = "gemini-2.0-flash"
+
+if not PROJECT_ID:
+    logger.error("!!! CRITICAL: GCP_PROJECT_ID is not set in environment. Gemini calls WILL fail with DNS errors. !!!")
+    # Using a dummy but valid-looking string to avoid NameError, but the call will fail cleanly with 404/403
+    PROJECT_ID = "missing-project-id"
 
 VERTEX_ENDPOINT = (
     f"https://{REGION}-aiplatform.googleapis.com/v1/"
@@ -33,7 +39,9 @@ VERTEX_ENDPOINT = (
     f"publishers/google/models/{GEMINI_MODEL_NAME}:generateContent"
 )
 
-# --- Concurrency & Rate Limiting (from user snippet) ---
+logger.info(f"Gemini initialized for Project: {PROJECT_ID} in Region: {REGION}")
+
+# --- Concurrency & Rate Limiting ---
 MAX_CONCURRENT_REQUEST = 1
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUEST)
 # Increased to 10s to be extra safe against Vertex sustained rate limits
