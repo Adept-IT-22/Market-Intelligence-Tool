@@ -7,7 +7,7 @@ services:
       context: ./Front-end/Market-Intelligence
       dockerfile: Dockerfile
     ports:
-      - "80:80"
+      - "4040:80"
     depends_on:
       - backend
     networks:
