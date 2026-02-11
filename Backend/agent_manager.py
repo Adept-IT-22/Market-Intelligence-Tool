@@ -161,6 +161,7 @@ class AgentManager:
         keywords = [w for w in tokens if w not in stopwords and len(w) >= 3]
         
         keyword_candidates = set()
+        keyword_scores = {} # Map table_name -> score
         high_confidence_keyword_tables = set()  # Tables with 2+ keyword matches (auto-include)
         if keywords:
             conn = sqlite3.connect(self.database_path)
@@ -182,10 +183,13 @@ class AgentManager:
                 
                 df_kw = pd.read_sql_query(query, conn, params=params_full)
                 for _, row in df_kw.iterrows():
-                    keyword_candidates.add(row['table_name'])
+                    table_name = row['table_name']
+                    score = row['score']
+                    keyword_candidates.add(table_name)
+                    keyword_scores[table_name] = score
                     # Auto-include tables matching 2+ keywords (high confidence)
-                    if row['score'] >= 2:
-                        high_confidence_keyword_tables.add(row['table_name'])
+                    if score >= 2:
+                        high_confidence_keyword_tables.add(table_name)
                 logger.info(f"Keyword search found {len(keyword_candidates)} candidates "
                            f"({len(high_confidence_keyword_tables)} high-confidence): "
                            f"{df_kw.to_dict(orient='records')}")
@@ -257,7 +261,9 @@ class AgentManager:
             final_tables = [t for t in routing_tables if t in valid_tables]
             
             # Always include high-confidence keyword matches (LLM may miss them)
-            for hc_table in sorted(high_confidence_keyword_tables, key=lambda t: (-df_kw[t], t)):
+            # Sort high confidence tables by score descending
+            sorted_hc = sorted(high_confidence_keyword_tables, key=lambda t: (-keyword_scores.get(t, 0), t))
+            for hc_table in sorted_hc:
                 if hc_table in valid_tables and hc_table not in final_tables:
                     final_tables.append(hc_table)
                     logger.info(f"Auto-included high-confidence keyword match: {hc_table}")
