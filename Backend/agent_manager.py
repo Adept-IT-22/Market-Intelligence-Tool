@@ -1,8 +1,12 @@
-
 import os
 import sqlite3
 import pandas as pd
-from groq import Groq
+import httpx
+import asyncio
+import time
+from tenacity import retry, wait_exponential, stop_after_attempt, RetryCallState
+from google.auth import default
+from google.auth.transport.requests import Request
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance
 from sentence_transformers import SentenceTransformer
@@ -11,33 +15,48 @@ import logging
 import json
 import re
 from urllib.parse import urlparse
+from typing import Optional, Any
 
 load_dotenv()
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Configuration
-GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+# --- Vertex AI / Gemini Configuration ---
+PROJECT_ID = os.getenv("GCP_PROJECT_ID", "gen-lang-client-0138772794")
+REGION = os.getenv("GCP_REGION", "us-central1")
+GEMINI_MODEL_NAME = "gemini-2.0-flash"
+
+VERTEX_ENDPOINT = (
+    f"https://{REGION}-aiplatform.googleapis.com/v1/"
+    f"projects/{PROJECT_ID}/locations/{REGION}/"
+    f"publishers/google/models/{GEMINI_MODEL_NAME}:generateContent"
+)
+
+# --- Concurrency & Rate Limiting (from user snippet) ---
+MAX_CONCURRENT_REQUEST = 1
+semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUEST)
+RATE_LIMIT_SECONDS = 6
+gemini_lock = asyncio.Lock()
+last_call = 0
+
+# Qdrant Configuration
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
-QDRANT_URL = os.getenv("QDRANT_URL")
 
 # Project Paths
 current_directory = os.path.dirname(os.path.abspath(__file__))
 DATABASE_PATH = os.getenv("DATABASE_PATH")
 
 if not DATABASE_PATH:
-    # DB folder is inside the app directory (same level as agent_manager.py)
     DATABASE_PATH = os.path.join(current_directory, "DB", "market-intelligence.db")
     logger.info(f"DATABASE_PATH not found in .env, using default: {DATABASE_PATH}")
 
 # Models
-LLM_MODEL_NAME = "llama-3.1-8b-instant"
 EMBEDDING_MODEL = "BAAI/bge-small-en"
 COLLECTION_NAME = "adept_database"
 
-# Global Cache for Embedding Model to prevent re-loading
+# Global Cache for Embedding Model
 _CACHED_EMBEDDINGS = None
 
 def get_embeddings_model():
@@ -47,10 +66,72 @@ def get_embeddings_model():
         _CACHED_EMBEDDINGS = SentenceTransformer(EMBEDDING_MODEL)
     return _CACHED_EMBEDDINGS
 
+# --- Gemini API Internal (Vertex) ---
+
+def get_access_token() -> str:
+    """Gets a fresh access token for Google Cloud."""
+    try:
+        creds, _ = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        creds.refresh(Request())
+        return creds.token
+    except Exception as e:
+        logger.warning(f"Failed to get GCP default credentials: {e}. Falling back to GEMINI_API_KEY env.")
+        return os.getenv("GEMINI_API_KEY", "")
+
+def retry_if_resource_exhausted(exception: BaseException) -> bool:
+    msg = str(exception).lower()
+    return "429" in msg or "quota" in msg or "limit" in msg or "503" in msg
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=4, max=60),
+    stop=stop_after_attempt(5),
+    retry=retry_if_resource_exhausted,
+    reraise=True,
+    before=lambda rs: logger.info(f"Retrying Gemini call... attempt #{rs.attempt_number}"),
+)
+async def _call_gemini_api_internal(prompt: str) -> str:
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.0,
+            "responseMimeType": "application/json" if "JSON" in prompt.upper() else "text/plain"
+        },
+    }
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        response = await client.post(VERTEX_ENDPOINT, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
+    return data["candidates"][0]["content"]["parts"][0]["text"]
+
+async def call_gemini_async(prompt: str) -> str:
+    global last_call
+    async with semaphore:
+        async with gemini_lock:
+            now = asyncio.get_event_loop().time()
+            elapsed = now - last_call
+            if elapsed < RATE_LIMIT_SECONDS:
+                sleep_time = RATE_LIMIT_SECONDS - elapsed
+                await asyncio.sleep(sleep_time)
+            last_call = asyncio.get_event_loop().time()
+        return await _call_gemini_api_internal(prompt)
+
+def call_gemini_sync(prompt: str) -> str:
+    """Synchronous wrapper for agent_manager."""
+    try:
+        return asyncio.run(call_gemini_async(prompt))
+    except Exception as e:
+        logger.error(f"Gemini call failed: {e}")
+        raise
+
 class AgentManager:
     def __init__(
         self,
-        llm_model_name: str = LLM_MODEL_NAME,
+        llm_model_name: str = GEMINI_MODEL_NAME,
         database_path: str = DATABASE_PATH,
         collection_name: str = COLLECTION_NAME,
         query: str = 'No prompt entered.'
@@ -71,9 +152,8 @@ class AgentManager:
         logger.info("Initializing Qdrant client")
         self.qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
-        # Initialize Groq Client
-        logger.info("Configuring Groq LLM")
-        self.client = Groq(api_key=GROQ_API_KEY)
+        # Gemini logic is handled via call_gemini_sync
+        logger.info(f"Configuring Gemini LLM ({self.llm_model_name})")
 
     def search_qdrant(self, top_k=5):
         logger.info("Searching Qdrant...")
@@ -244,15 +324,8 @@ class AgentManager:
         """
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.llm_model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.0
-            )
-            content = response.choices[0].message.content.strip()
+            content = call_gemini_sync(user_prompt)
+            content = content.strip()
             # Clean
             routing_tables = [t.strip().strip('"').strip("'") for t in content.split(',') if t.strip()]
             
@@ -344,18 +417,10 @@ class AgentManager:
         """
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.llm_model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.0,
-                response_format={"type": "json_object"}
-            )
+            content = call_gemini_sync(user_prompt)
             
             try:
-                result = json.loads(response.choices[0].message.content)
+                result = json.loads(content)
                 logger.info(f"Level 2 Selected: {result}")
                 return result
             except json.JSONDecodeError as je:
@@ -542,15 +607,8 @@ class AgentManager:
         """
         
         try:
-            response = self.client.chat.completions.create(
-                model=self.llm_model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3
-            )
-            return response.choices[0].message.content
+            content = call_gemini_sync(f"{system_prompt}\n\n{user_prompt}")
+            return content
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
             return "I encountered an error generating the final response."

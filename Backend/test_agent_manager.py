@@ -50,20 +50,19 @@ class TestAgentManager(unittest.TestCase):
     @patch('agent_manager.sqlite3.connect')
     @patch('agent_manager.pd.read_sql_query')
     @patch.object(AgentManager, 'search_qdrant')
-    def test_get_master_routing_basic(self, mock_search, mock_read_sql, mock_connect):
+    @patch('agent_manager.call_gemini_sync')
+    def test_get_master_routing_basic(self, mock_gemini, mock_search, mock_read_sql, mock_connect):
         # 1. Mock Semantic Search
         mock_point = MagicMock()
         mock_point.payload = {'routing_table': 'semantic_table'}
         mock_search.return_value = [mock_point]
 
         # 2. Mock Keyword Search SQL
-        # First call to read_sql_query for keyword search (df_kw)
         df_kw = pd.DataFrame([
             {'table_name': 'kw_table_high', 'score': 2},
             {'table_name': 'kw_table_low', 'score': 1}
         ])
         
-        # Second call for Master entries
         df_master = pd.DataFrame([
             {'id': 1, 'Title': 'Semantic Title', 'Source': 'src', 'Summary': 'sum', 'Datatype': 'dt', 'Sectors': 'sec', 'table_name': 'semantic_table'},
             {'id': 2, 'Title': 'High KW Title', 'Source': 'src', 'Summary': 'sum', 'Datatype': 'dt', 'Sectors': 'sec', 'table_name': 'kw_table_high'},
@@ -72,24 +71,22 @@ class TestAgentManager(unittest.TestCase):
         
         mock_read_sql.side_effect = [df_kw, df_master]
 
-        # 3. Mock Groq LLM
-        self.manager.client = MagicMock()
-        self.manager.client.chat.completions.create.return_value.choices[0].message.content = "semantic_table"
+        # 3. Mock Gemini
+        mock_gemini.return_value = "semantic_table"
 
         # Execute
         result = self.manager.get_master_routing()
 
         # Verify
-        # Should include LLM selection AND high-confidence keyword match
         self.assertIn('semantic_table', result)
         self.assertIn('kw_table_high', result)
-        # kw_table_low was keyword candidate but score was 1, so LLM didn't select it and it wasn't auto-included
         self.assertNotIn('kw_table_low', result)
 
     @patch('agent_manager.sqlite3.connect')
     @patch('agent_manager.pd.read_sql_query')
     @patch.object(AgentManager, 'search_qdrant')
-    def test_get_master_routing_fallback(self, mock_search, mock_read_sql, mock_connect):
+    @patch('agent_manager.call_gemini_sync')
+    def test_get_master_routing_fallback(self, mock_gemini, mock_search, mock_read_sql, mock_connect):
         # Mocking LLM failure to trigger fallback
         mock_search.return_value = []
         
@@ -100,9 +97,8 @@ class TestAgentManager(unittest.TestCase):
         
         mock_read_sql.side_effect = [df_kw, df_master]
 
-        # Triggering an exception in LLM call
-        self.manager.client = MagicMock()
-        self.manager.client.chat.completions.create.side_effect = Exception("Groq Timeout")
+        # Triggering an exception in Gemini call
+        mock_gemini.side_effect = Exception("Gemini Timeout")
 
         # Execute
         result = self.manager.get_master_routing()
@@ -111,10 +107,10 @@ class TestAgentManager(unittest.TestCase):
         self.assertEqual(result, ['high1'])
 
     @patch('agent_manager.sqlite3.connect')
-    def test_get_routing_response(self, mock_connect):
-        # Mock Level 2 LLM selection
-        self.manager.client = MagicMock()
-        self.manager.client.chat.completions.create.return_value.choices[0].message.content = '{"sql_tables": ["t1"], "qdrant_ids": ["q1"]}'
+    @patch('agent_manager.call_gemini_sync')
+    def test_get_routing_response(self, mock_gemini, mock_connect):
+        # Mock Level 2 Gemini selection
+        mock_gemini.return_value = '{"sql_tables": ["t1"], "qdrant_ids": ["q1"]}'
         
         # Mock SQL retrieval for routing table
         mock_read_sql = patch('agent_manager.pd.read_sql_query').start()
