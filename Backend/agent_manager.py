@@ -142,18 +142,30 @@ class AgentManager:
         # If the user asks for a specific file by name (e.g. "Client Stories"), 
         # we should search the Master Title directly.
         
-        # Simple keyword extraction: remove Stopwords (rudimentary)
-        stopwords = {'the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'about'}
-        keywords = [w for w in self.query.lower().split() if w.isalnum() and w not in stopwords]
+        # Simple keyword extraction: remove Stopwords (expanded to prevent substring false positives)
+        stopwords = {
+            'the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'about',
+            'what', 'how', 'why', 'when', 'where', 'who', 'which', 'is', 'are', 'was',
+            'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
+            'will', 'would', 'could', 'should', 'may', 'might', 'can', 'shall',
+            'not', 'no', 'nor', 'but', 'or', 'and', 'so', 'if', 'then', 'than',
+            'too', 'very', 'just', 'also', 'some', 'any', 'all', 'each', 'every',
+            'both', 'few', 'more', 'most', 'other', 'into', 'through', 'during',
+            'before', 'after', 'above', 'below', 'between', 'under', 'again',
+            'there', 'here', 'this', 'that', 'these', 'those', 'it', 'its',
+            'me', 'my', 'we', 'our', 'you', 'your', 'they', 'their', 'them',
+            'i', 'he', 'she', 'his', 'her', 'him', 'us', 'within', 'from'
+        }
+        # Tokenize query into alphanumeric words, then filter out stopwords and very short tokens
+        tokens = re.findall(r"[a-z0-9]+", self.query.lower())
+        keywords = [w for w in tokens if w not in stopwords and len(w) >= 3]
         
         keyword_candidates = set()
+        high_confidence_keyword_tables = set()  # Tables with 2+ keyword matches (auto-include)
         if keywords:
             conn = sqlite3.connect(self.database_path)
-            # Find any Master entry where Title contains ANY relevant keyword
-            # We limit this to avoid exploding context - say top 5 matches
             try:
                 # Improved Keyword Search: Rank by number of match hits
-                # We build a query that counts how many keywords appear in the title
                 match_scores = " + ".join([f"(case when Title LIKE ? then 1 else 0 end)" for _ in keywords])
                 params = [f"%{k}%" for k in keywords]
                 # Filter to only rows that have at least one match
@@ -165,13 +177,18 @@ class AgentManager:
                     FROM Master 
                     WHERE {conditions} 
                     ORDER BY score DESC 
-                    LIMIT 10
+                    LIMIT 20
                 """
                 
                 df_kw = pd.read_sql_query(query, conn, params=params_full)
-                for table in df_kw['table_name'].tolist():
-                    keyword_candidates.add(table)
-                logger.info(f"Keyword search found {len(keyword_candidates)} candidates: {df_kw.to_dict(orient='records')}")
+                for _, row in df_kw.iterrows():
+                    keyword_candidates.add(row['table_name'])
+                    # Auto-include tables matching 2+ keywords (high confidence)
+                    if row['score'] >= 2:
+                        high_confidence_keyword_tables.add(row['table_name'])
+                logger.info(f"Keyword search found {len(keyword_candidates)} candidates "
+                           f"({len(high_confidence_keyword_tables)} high-confidence): "
+                           f"{df_kw.to_dict(orient='records')}")
             except Exception as e:
                 logger.warning(f"Keyword search failed: {e}")
             conn.close()
@@ -239,10 +256,21 @@ class AgentManager:
             valid_tables = df_master['table_name'].tolist()
             final_tables = [t for t in routing_tables if t in valid_tables]
             
+            # Always include high-confidence keyword matches (LLM may miss them)
+            for hc_table in sorted(high_confidence_keyword_tables, key=lambda t: (-df_kw[t], t)):
+                if hc_table in valid_tables and hc_table not in final_tables:
+                    final_tables.append(hc_table)
+                    logger.info(f"Auto-included high-confidence keyword match: {hc_table}")
+            
             logger.info(f"Level 1 Selected: {final_tables}")
             return final_tables
         except Exception as e:
             logger.error(f"Master Routing failed: {e}")
+            # Fallback: return high-confidence keyword matches even if LLM fails
+            if high_confidence_keyword_tables:
+                fallback = [t for t in high_confidence_keyword_tables if re.match(r'^[a-z0-9_]+$', t)]
+                logger.info(f"Using keyword fallback: {fallback}")
+                return fallback
             return []
 
     def get_routing_response(self, routing_tables: list):
