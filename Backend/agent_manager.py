@@ -110,7 +110,11 @@ def retry_if_resource_exhausted(exception: BaseException) -> bool:
 
 def log_before_gemini(retry_state: RetryCallState):
     if retry_state.attempt_number > 1:
-        logger.info(f"Retrying Gemini call... attempt #{retry_state.attempt_number} (prev failed)")
+        if retry_state.outcome and retry_state.outcome.failed:
+            ex = retry_state.outcome.exception()
+            logger.warning(f"Retrying Gemini call... attempt #{retry_state.attempt_number} due to {type(ex).__name__}: {ex}")
+        else:
+            logger.info(f"Retrying Gemini call... attempt #{retry_state.attempt_number} (prev failed)")
     else:
         logger.info("Starting Gemini API call...")
 
