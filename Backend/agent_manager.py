@@ -36,7 +36,8 @@ VERTEX_ENDPOINT = (
 # --- Concurrency & Rate Limiting (from user snippet) ---
 MAX_CONCURRENT_REQUEST = 1
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUEST)
-RATE_LIMIT_SECONDS = 6
+# Increased to 10s to be extra safe against Vertex sustained rate limits
+RATE_LIMIT_SECONDS = 10 
 gemini_lock = asyncio.Lock()
 last_call = 0
 
@@ -70,24 +71,47 @@ def get_embeddings_model():
 
 def get_access_token() -> str:
     """Gets a fresh access token for Google Cloud."""
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if creds_path:
+        if not os.path.isabs(creds_path):
+            potential_path = os.path.join(current_directory, creds_path)
+            if os.path.exists(potential_path):
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = potential_path
+                logger.info(f"Resolved relative GOOGLE_APPLICATION_CREDENTIALS to: {potential_path}")
+            else:
+                logger.warning(f"GOOGLE_APPLICATION_CREDENTIALS set to relative path '{creds_path}' but file not found at '{potential_path}'")
+        else:
+            logger.info(f"Using absolute GOOGLE_APPLICATION_CREDENTIALS: {creds_path}")
+            if not os.path.exists(creds_path):
+                logger.warning(f"GOOGLE_APPLICATION_CREDENTIALS points to non-existent file: {creds_path}")
+
     try:
         creds, _ = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
         creds.refresh(Request())
         return creds.token
     except Exception as e:
         logger.warning(f"Failed to get GCP default credentials: {e}. Falling back to GEMINI_API_KEY env.")
-        return os.getenv("GEMINI_API_KEY", "")
+        fallback_key = os.getenv("GEMINI_API_KEY", "")
+        if not fallback_key:
+            logger.error("No valid GCP credentials OR GEMINI_API_KEY found.")
+        return fallback_key
 
 def retry_if_resource_exhausted(exception: BaseException) -> bool:
     msg = str(exception).lower()
     return "429" in msg or "quota" in msg or "limit" in msg or "503" in msg
+
+def log_before_gemini(retry_state: RetryCallState):
+    if retry_state.attempt_number > 1:
+        logger.info(f"Retrying Gemini call... attempt #{retry_state.attempt_number} (prev failed)")
+    else:
+        logger.info("Starting Gemini API call...")
 
 @retry(
     wait=wait_exponential(multiplier=1, min=4, max=60),
     stop=stop_after_attempt(5),
     retry=retry_if_resource_exhausted,
     reraise=True,
-    before=lambda rs: logger.info(f"Retrying Gemini call... attempt #{rs.attempt_number}"),
+    before=log_before_gemini,
 )
 async def _call_gemini_api_internal(prompt: str) -> str:
     token = get_access_token()
@@ -99,11 +123,13 @@ async def _call_gemini_api_internal(prompt: str) -> str:
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.0,
-            "responseMimeType": "application/json" if "JSON" in prompt.upper() else "text/plain"
+            "responseMimeType": "application/json" if "JSON" in prompt.upper() or "Output JSON:" in prompt else "text/plain"
         },
     }
-    async with httpx.AsyncClient(timeout=45.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(VERTEX_ENDPOINT, headers=headers, json=payload)
+        if response.status_code != 200:
+            logger.warning(f"Gemini API returned {response.status_code}: {response.text}")
         response.raise_for_status()
         data = response.json()
     return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -112,10 +138,12 @@ async def call_gemini_async(prompt: str) -> str:
     global last_call
     async with semaphore:
         async with gemini_lock:
+            # Important: Use loop.time() for consistency
             now = asyncio.get_event_loop().time()
             elapsed = now - last_call
             if elapsed < RATE_LIMIT_SECONDS:
                 sleep_time = RATE_LIMIT_SECONDS - elapsed
+                logger.info(f"Rate limit: sleeping {sleep_time:.1f}s")
                 await asyncio.sleep(sleep_time)
             last_call = asyncio.get_event_loop().time()
         return await _call_gemini_api_internal(prompt)
@@ -125,7 +153,7 @@ def call_gemini_sync(prompt: str) -> str:
     try:
         return asyncio.run(call_gemini_async(prompt))
     except Exception as e:
-        logger.error(f"Gemini call failed: {e}")
+        logger.error(f"Gemini call failed completely: {e}")
         raise
 
 class AgentManager:
