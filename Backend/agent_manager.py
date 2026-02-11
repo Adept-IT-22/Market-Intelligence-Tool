@@ -141,10 +141,6 @@ async def _call_gemini_api_internal(prompt: str) -> str:
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(VERTEX_ENDPOINT, headers=headers, json=payload)
         
-        # DEBUG: Print exact response from Gemini
-        logger.info(f"Gemini Raw Response Status: {response.status_code}")
-        logger.info(f"Gemini Raw Response Body: {response.text[:2000]}") # Cap at 2000 chars
-
         try:
             response_data = response.json()
         except Exception as e:
