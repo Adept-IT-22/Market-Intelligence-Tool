@@ -173,9 +173,11 @@ async def _call_gemini_api_internal(prompt: str) -> str:
                 logger.error(f"Gemini content empty (Reason: {finish_reason}). Full Candidate: {candidate}")
                 return f"UNAVAILABLE: Gemini blocked the response generation. Reason: {finish_reason}"
                 
-            return content["parts"][0]["text"]
+            ret_val = content["parts"][0]["text"]
+            # logger.info(f"Gemini Internal Success: {ret_val[:100]}...") # Optional: log success
+            return ret_val
             
-        except Exception as e:
+        except BaseException as e:
             logger.error(f"FATAL ERROR in _call_gemini_api_internal: {type(e).__name__}: {e}")
             raise
 
