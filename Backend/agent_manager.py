@@ -156,8 +156,9 @@ class AgentManager:
             'me', 'my', 'we', 'our', 'you', 'your', 'they', 'their', 'them',
             'i', 'he', 'she', 'his', 'her', 'him', 'us', 'within', 'from'
         }
-        # Filter keywords: must be alphanumeric, not a stopword, and at least 3 chars to avoid substring noise
-        keywords = [w for w in self.query.lower().split() if w.isalnum() and w not in stopwords and len(w) >= 3]
+        # Tokenize query into alphanumeric words, then filter out stopwords and very short tokens
+        tokens = re.findall(r"[a-z0-9]+", self.query.lower())
+        keywords = [w for w in tokens if w not in stopwords and len(w) >= 3]
         
         keyword_candidates = set()
         high_confidence_keyword_tables = set()  # Tables with 2+ keyword matches (auto-include)
