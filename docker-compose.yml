@@ -21,13 +21,19 @@ services:
     environment:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-      # USER MUST SET THIS IN .env FILE or EXPORT
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      - GCP_REGION=${GCP_REGION}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
     volumes:
       # Persist the SQLite Database
       - ./Backend/DB:/app/DB
       # Persist Uploads
       - ./Backend/uploads:/app/uploads
+      # Mount Config files (Allow updates without rebuild)
+      - ./Backend/.env:/app/.env
+      - ./Backend/service-account.json:/app/service-account.json
     expose:
       - "8000"
     depends_on:

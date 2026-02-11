@@ -23,7 +23,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # --- Vertex AI / Gemini Configuration ---
-PROJECT_ID = os.getenv("GCP_PROJECT_ID", "gen-lang-client-0138772794")
+PROJECT_ID = os.getenv("GCP_PROJECT_ID")
 REGION = os.getenv("GCP_REGION", "us-central1")
 GEMINI_MODEL_NAME = "gemini-2.0-flash"
 
@@ -126,34 +126,41 @@ async def _call_gemini_api_internal(prompt: str) -> str:
             "responseMimeType": "application/json" if "JSON" in prompt.upper() or "Output JSON:" in prompt else "text/plain"
         },
     }
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(VERTEX_ENDPOINT, headers=headers, json=payload)
-        response_data = response.json()
+        
+        try:
+            response_data = response.json()
+        except Exception as e:
+            logger.error(f"Failed to parse Gemini response as JSON. Status: {response.status_code}, Error: {e}, Payload: {response.text[:500]}")
+            response.raise_for_status()
+            raise ValueError(f"Gemini returned non-JSON response: {response.text[:500]}")
         
         if response.status_code != 200:
-            logger.warning(f"Gemini API returned {response.status_code}: {response.text}")
+            logger.warning(f"Gemini API returned {response.status_code}: {response_data}")
             response.raise_for_status()
             
         # Robust parsing of candidates
-        try:
-            candidates = response_data.get("candidates", [])
-            if not candidates:
-                # Check for blocking reasons
-                prompt_feedback = response_data.get("promptFeedback", {})
-                if prompt_feedback:
-                    logger.warning(f"Gemini Prompt Blocked: {prompt_feedback}")
-                raise ValueError(f"Gemini returned no candidates. Full response: {response_data}")
+        candidates = response_data.get("candidates", [])
+        if not candidates:
+            # Check for blocking reasons
+            prompt_feedback = response_data.get("promptFeedback", {})
+            if prompt_feedback:
+                logger.error(f"Gemini Prompt Blocked: {prompt_feedback}")
+                return "UNAVAILABLE: The query prompt was blocked by Gemini safety filters."
             
-            candidate = candidates[0]
-            if "content" not in candidate:
-                finish_reason = candidate.get("finishReason")
-                logger.warning(f"Gemini Candidate has no content. Finish Reason: {finish_reason}")
-                raise ValueError(f"Gemini candidate blocked or empty. Reason: {finish_reason}")
-                
-            return candidate["content"]["parts"][0]["text"]
-        except (KeyError, IndexError) as e:
-            logger.error(f"Failed to parse Gemini response: {e}. Body: {response_data}")
-            raise ValueError(f"Unexpected Gemini response structure: {e}")
+            # If it's not blocked but empty, it might be a transient API weirdness
+            logger.warning(f"Gemini returned no candidates. Full response: {response_data}")
+            raise ValueError(f"Gemini returned empty candidates list (no feedback reason). Response: {response_data}")
+        
+        candidate = candidates[0]
+        content = candidate.get("content")
+        if not content or "parts" not in content:
+            finish_reason = candidate.get("finishReason")
+            logger.error(f"Gemini content empty (Reason: {finish_reason}). Full Candidate: {candidate}")
+            return f"UNAVAILABLE: Gemini blocked the response generation. Reason: {finish_reason}"
+            
+        return content["parts"][0]["text"]
 
 async def call_gemini_async(prompt: str) -> str:
     global last_call
@@ -348,28 +355,28 @@ class AgentManager:
         query = f"SELECT id, Title, Source, Summary, Datatype, Sectors, table_name FROM Master WHERE table_name IN ({placeholders})"
         df_master = pd.read_sql_query(query, conn, params=safe_candidates)
         conn.close()
-        
-        if df_master.empty:
-            logger.warning("No matching Master entries for candidates in database." \
-            "semantic_candidates = %d, safe_candidates = %d", len(candidate_routing_tables), len(safe_candidates))
-            return [] # Returning empty list instead of unverified candidates as per best practice
 
-        master_context = df_master.to_string(index=False)
+        # 3. Use LLM to pick the absolute best ones (Capped at 8 to avoid Level 2 overflow)
+        # Priority: High confidence keyword matches come first, then others
+        master_text = ""
+        for _, row in df_master.iterrows():
+            prefix = "[HIGH CONFIDENCE] " if row['table_name'] in high_confidence_keyword_tables else ""
+            master_text += f"- {prefix}Table: {row['table_name']} | Title: {row['Title']} | Summary: {row['Summary']}\n"
 
         system_prompt = (
-            "You are a Data Architect. Your goal is to select relevant 'Routing Tables' from the Master Menu. "
-            "Analyze the User Query and the filtered Master Table. "
-            "Return a comma-separated list of 'table_name' that are most relevant to answering the query. "
-            "If nothing is relevant, return nothing."
+            "You are a Senior Strategic Researcher. "
+            "Review the available data sources and select the TOP 8 tables most relevant to the query. "
+            "Prioritize sources with '[HIGH CONFIDENCE]' if they match the query well. "
+            "Return a COMMA-SEPARATED list of 'table_name' strings only."
         )
-
+        
         user_prompt = f"""
         User Query: "{self.query}"
         
-        --- Filtered Master Table (Candidates) ---
-        {master_context}
+        --- Available Sources ---
+        {master_text}
         
-        Output Format: table_name1, table_name2
+        Return top 8 table names (comma-separated):
         """
 
         try:
@@ -378,28 +385,25 @@ class AgentManager:
             # Clean
             routing_tables = [t.strip().strip('"').strip("'") for t in content.split(',') if t.strip()]
             
-            # Verify they exist in our list
-            valid_tables = df_master['table_name'].tolist()
-            final_tables = [t for t in routing_tables if t in valid_tables]
+            # FINAL CAP: Ensure no more than 8 tables are processed by Level 2
+            if len(routing_tables) > 8:
+                logger.warning(f"Cutting routing selection from {len(routing_tables)} to 8 for prompt safety.")
+                routing_tables = routing_tables[:8]
             
-            # Always include high-confidence keyword matches (LLM may miss them)
-            # Sort high confidence tables by score descending
-            sorted_hc = sorted(high_confidence_keyword_tables, key=lambda t: (-keyword_scores.get(t, 0), t))
-            for hc_table in sorted_hc:
-                if hc_table in valid_tables and hc_table not in final_tables:
-                    final_tables.append(hc_table)
-                    logger.info(f"Auto-included high-confidence keyword match: {hc_table}")
-            
-            logger.info(f"Level 1 Selected: {final_tables}")
-            return final_tables
+            # Auto-include high-confidence matches if missed, but keep total <= 8
+            for kw_table in high_confidence_keyword_tables:
+                if kw_table not in routing_tables and len(routing_tables) < 8:
+                    if re.match(r'^[a-z0-9_]+$', kw_table):
+                         logger.info(f"Auto-including high-confidence keyword match: {kw_table}")
+                         routing_tables.append(kw_table)
+
+            logger.info(f"Level 1 Selected: {routing_tables}")
+            return routing_tables
         except Exception as e:
             logger.error(f"Master Routing failed: {e}")
-            # Fallback: return high-confidence keyword matches even if LLM fails
-            if high_confidence_keyword_tables:
-                fallback = [t for t in high_confidence_keyword_tables if re.match(r'^[a-z0-9_]+$', t)]
-                logger.info(f"Using keyword fallback: {fallback}")
-                return fallback
-            return []
+            # Fallback: return high-confidence keyword matches capped at 8
+            fallback = [t for t in high_confidence_keyword_tables if re.match(r'^[a-z0-9_]+$', t)]
+            return fallback[:8]
 
     def get_routing_response(self, routing_tables: list):
         """
@@ -604,8 +608,15 @@ class AgentManager:
              source_name = self._get_display_name(source_link)
              semantic_context += f"- Document: {source_name} (URI: {source_link})\n  Content: {text}\n\n"
 
-        # Final Synthesis
-        return self.get_final_response(semantic_results, {"Hierarchical Data": detail_context, "Semantic Data": semantic_context})
+        # Final Synthesis (Passing routing_tables for transparency)
+        return self.get_final_response(
+            semantic_results, 
+            {
+                "Hierarchical Data": detail_context, 
+                "Semantic Data": semantic_context,
+                "Routing Tables": routing_tables
+            }
+        )
 
     def get_final_response(self, search_results, context_dict):
         # Renamed '_' to 'search_results' for backward compatibility/clarity
@@ -613,6 +624,7 @@ class AgentManager:
         
         hierarchical_data = context_dict.get("Hierarchical Data", "")
         semantic_data = context_dict.get("Semantic Data")
+        routing_tables = context_dict.get("Routing Tables", [])
         
         # Fallback if semantic data missing but search results exist
         if not semantic_data and search_results:
@@ -627,6 +639,12 @@ class AgentManager:
             
         if semantic_data is None: semantic_data = ""
         
+        # Create a "Thought Trace" to prove Level 1 routing is working
+        thought_trace = ""
+        if routing_tables:
+            thought_trace = "\n\n> **AI Thought Trace (Level 1 Routing)**: \n> " + \
+                           ", ".join([f"`{t}`" for t in routing_tables]) + "\n\n"
+
         system_prompt = (
             "You are an expert Market Intelligence Analyst for Adept Technologies Ltd. "
             "Synthesize the provided data to answer the User Query accurately. "
@@ -657,6 +675,10 @@ class AgentManager:
         
         try:
             content = call_gemini_sync(f"{system_prompt}\n\n{user_prompt}")
+            
+            # Inject the thought trace at the top of the answer for transparency
+            if thought_trace:
+                return f"{thought_trace}{content}"
             return content
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
