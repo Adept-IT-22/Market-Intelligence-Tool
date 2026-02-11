@@ -257,7 +257,7 @@ class AgentManager:
             final_tables = [t for t in routing_tables if t in valid_tables]
             
             # Always include high-confidence keyword matches (LLM may miss them)
-            for hc_table in high_confidence_keyword_tables:
+            for hc_table in sorted(high_confidence_keyword_tables, key=lambda t: (-df_kw[t], t)):
                 if hc_table in valid_tables and hc_table not in final_tables:
                     final_tables.append(hc_table)
                     logger.info(f"Auto-included high-confidence keyword match: {hc_table}")
