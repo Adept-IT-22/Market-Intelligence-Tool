@@ -118,68 +118,83 @@ def log_before_gemini(retry_state: RetryCallState):
     else:
         logger.info("Starting Gemini API call...")
 
-@retry(
-    wait=wait_exponential(multiplier=1, min=4, max=60),
-    stop=stop_after_attempt(5),
-    retry=retry_if_resource_exhausted,
-    reraise=True,
-    before=log_before_gemini,
-)
 async def _call_gemini_api_internal(prompt: str) -> str:
-    token = get_access_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.0,
-            "responseMimeType": "application/json" if "JSON" in prompt.upper() or "Output JSON:" in prompt else "text/plain"
-        },
-    }
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    # Explicit Retry Loop to replace tenacity
+    attempt = 0
+    max_attempts = 5
+    
+    while attempt < max_attempts:
+        attempt += 1
         try:
-            response = await client.post(VERTEX_ENDPOINT, headers=headers, json=payload)
+            token = get_access_token()
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.0,
+                    "responseMimeType": "application/json" if "JSON" in prompt.upper() or "Output JSON:" in prompt else "text/plain"
+                },
+            }
             
-            try:
-                response_data = response.json()
-            except Exception as e:
-                logger.error(f"Failed to parse Gemini response as JSON. Status: {response.status_code}, Error: {e}, Payload: {response.text[:500]}")
-                response.raise_for_status()
-                raise ValueError(f"Gemini returned non-JSON response: {response.text[:500]}")
-            
-            if response.status_code != 200:
-                logger.warning(f"Gemini API returned {response.status_code}: {response_data}")
-                response.raise_for_status()
+            if attempt > 1:
+                logger.info(f"Retrying Gemini call... attempt #{attempt}")
+            else:
+                logger.info("Starting Gemini API call...")
+
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(VERTEX_ENDPOINT, headers=headers, json=payload)
                 
-            # Robust parsing of candidates
-            candidates = response_data.get("candidates", [])
-            if not candidates:
-                # Check for blocking reasons
-                prompt_feedback = response_data.get("promptFeedback", {})
-                if prompt_feedback:
-                    logger.error(f"Gemini Prompt Blocked: {prompt_feedback}")
-                    return "UNAVAILABLE: The query prompt was blocked by Gemini safety filters."
+                try:
+                    response_data = response.json()
+                except Exception as e:
+                    logger.error(f"Failed to parse Gemini response as JSON. Status: {response.status_code}, Error: {e}, Payload: {response.text[:500]}")
+                    response.raise_for_status()
+                    raise ValueError(f"Gemini returned non-JSON response: {response.text[:500]}")
                 
-                # If it's not blocked but empty, it might be a transient API weirdness
-                logger.warning(f"Gemini returned no candidates. Full response: {response_data}")
-                raise ValueError(f"Gemini returned empty candidates list (no feedback reason). Response: {response_data}")
-            
-            candidate = candidates[0]
-            content = candidate.get("content")
-            if not content or "parts" not in content:
-                finish_reason = candidate.get("finishReason")
-                logger.error(f"Gemini content empty (Reason: {finish_reason}). Full Candidate: {candidate}")
-                return f"UNAVAILABLE: Gemini blocked the response generation. Reason: {finish_reason}"
+                if response.status_code != 200:
+                    logger.warning(f"Gemini API returned {response.status_code}: {response_data}")
+                    response.raise_for_status()
+                    
+                # Robust parsing of candidates
+                candidates = response_data.get("candidates", [])
+                if not candidates:
+                    # Check for blocking reasons
+                    prompt_feedback = response_data.get("promptFeedback", {})
+                    if prompt_feedback:
+                        logger.error(f"Gemini Prompt Blocked: {prompt_feedback}")
+                        return "UNAVAILABLE: The query prompt was blocked by Gemini safety filters."
+                    
+                    logger.warning(f"Gemini returned no candidates. Full response: {response_data}")
+                    raise ValueError(f"Gemini returned empty candidates list (no feedback reason). Response: {response_data}")
                 
-            ret_val = content["parts"][0]["text"]
-            # logger.info(f"Gemini Internal Success: {ret_val[:100]}...") # Optional: log success
-            return ret_val
+                candidate = candidates[0]
+                content = candidate.get("content")
+                if not content or "parts" not in content:
+                    finish_reason = candidate.get("finishReason")
+                    logger.error(f"Gemini content empty (Reason: {finish_reason}). Full Candidate: {candidate}")
+                    return f"UNAVAILABLE: Gemini blocked the response generation. Reason: {finish_reason}"
+                    
+                ret_val = content["parts"][0]["text"]
+                return ret_val
+                
+        except Exception as e:
+            # Check if we should retry
+            msg = str(e).lower()
+            should_retry = "429" in msg or "quota" in msg or "limit" in msg or "503" in msg or "socket" in msg or "timeout" in msg
             
-        except BaseException as e:
-            logger.error(f"FATAL ERROR in _call_gemini_api_internal: {type(e).__name__}: {e}")
+            if attempt < max_attempts and should_retry:
+                wait_time = min(60, 4 * (2 ** (attempt - 1))) # Exponential backoff
+                logger.warning(f"Gemini Attempt #{attempt} failed with {type(e).__name__}: {e}. Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+                continue
+            
+            logger.error(f"Gemini Attempt #{attempt} failed FATALLY with {type(e).__name__}: {e}")
             raise
+
+    raise RuntimeError("Gemini Max Retries Exceeded")
 
 async def call_gemini_async(prompt: str) -> str:
     global last_call
