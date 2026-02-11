@@ -128,24 +128,45 @@ async def _call_gemini_api_internal(prompt: str) -> str:
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(VERTEX_ENDPOINT, headers=headers, json=payload)
+        response_data = response.json()
+        
         if response.status_code != 200:
             logger.warning(f"Gemini API returned {response.status_code}: {response.text}")
-        response.raise_for_status()
-        data = response.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+            response.raise_for_status()
+            
+        # Robust parsing of candidates
+        try:
+            candidates = response_data.get("candidates", [])
+            if not candidates:
+                # Check for blocking reasons
+                prompt_feedback = response_data.get("promptFeedback", {})
+                if prompt_feedback:
+                    logger.warning(f"Gemini Prompt Blocked: {prompt_feedback}")
+                raise ValueError(f"Gemini returned no candidates. Full response: {response_data}")
+            
+            candidate = candidates[0]
+            if "content" not in candidate:
+                finish_reason = candidate.get("finishReason")
+                logger.warning(f"Gemini Candidate has no content. Finish Reason: {finish_reason}")
+                raise ValueError(f"Gemini candidate blocked or empty. Reason: {finish_reason}")
+                
+            return candidate["content"]["parts"][0]["text"]
+        except (KeyError, IndexError) as e:
+            logger.error(f"Failed to parse Gemini response: {e}. Body: {response_data}")
+            raise ValueError(f"Unexpected Gemini response structure: {e}")
 
 async def call_gemini_async(prompt: str) -> str:
     global last_call
     async with semaphore:
         async with gemini_lock:
-            # Important: Use loop.time() for consistency
-            now = asyncio.get_event_loop().time()
+            loop = asyncio.get_event_loop()
+            now = loop.time()
             elapsed = now - last_call
             if elapsed < RATE_LIMIT_SECONDS:
                 sleep_time = RATE_LIMIT_SECONDS - elapsed
                 logger.info(f"Rate limit: sleeping {sleep_time:.1f}s")
                 await asyncio.sleep(sleep_time)
-            last_call = asyncio.get_event_loop().time()
+            last_call = loop.time()
         return await _call_gemini_api_internal(prompt)
 
 def call_gemini_sync(prompt: str) -> str:

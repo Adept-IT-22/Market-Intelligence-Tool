@@ -25,4 +25,4 @@ COPY . .
 EXPOSE 8000
 
 # Run the app
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "main:app", "--reload", "--timeout", "120"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "main:app", "--reload", "--timeout", "300"]
