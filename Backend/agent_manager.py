@@ -112,10 +112,11 @@ async def _call_gemini_api_internal(prompt: str) -> str:
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    payload = {
+    data = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 0.0,
+            "temperature": 0.2,
+            "maxOutputTokens": 8192,
             "responseMimeType": "application/json" if "JSON" in prompt.upper() or "Output JSON:" in prompt else "text/plain"
         },
     }
