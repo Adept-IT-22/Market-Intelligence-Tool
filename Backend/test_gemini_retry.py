@@ -7,6 +7,21 @@ import os
 class TestGeminiRetry(unittest.IsolatedAsyncioTestCase):
     
     async def asyncSetUp(self):
+        # Add local directory to path for import, but track it for cleanup
+        self.project_root = os.path.dirname(os.path.abspath(__file__))
+        if self.project_root not in sys.path:
+            sys.path.insert(0, self.project_root)
+            self.path_added = True
+        else:
+            self.path_added = False
+
+        # Patch environment variables BEFORE importing agent_manager
+        self.patcher_env = patch.dict(os.environ, {
+            "GCP_PROJECT_ID": "test-project", 
+            "GEMINI_API_KEY": "test-key"
+        })
+        self.patcher_env.start()
+
         # Create mocks for all dependencies
         self.mock_qdrant = MagicMock()
         self.mock_sentences = MagicMock()
@@ -25,11 +40,8 @@ class TestGeminiRetry(unittest.IsolatedAsyncioTestCase):
             "dotenv": self.mock_dotenv,
         })
         self.modules_patcher.start()
-        
-        # Add local directory to path for import
-        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-        # Ensure we re-import agent_manager to pick up the mocks
+        # Ensure we re-import agent_manager to pick up the mocks and env vars
         if 'agent_manager' in sys.modules:
             del sys.modules['agent_manager']
             
@@ -47,10 +59,15 @@ class TestGeminiRetry(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         self.token_patcher.stop()
         self.modules_patcher.stop()
+        self.patcher_env.stop()
         self.logger.disabled = False
         
-        # CRITICAL: Remove the mocked agent_manager from sys.modules so subsequent tests
-        # confirm real dependencies or their own mocks, avoiding pollution.
+        # Clean up sys.path if we added it
+        if self.path_added:
+            if self.project_root in sys.path:
+                sys.path.remove(self.project_root)
+        
+        # CRITICAL: Remove the mocked agent_manager from sys.modules
         if 'agent_manager' in sys.modules:
             del sys.modules['agent_manager']
 
@@ -114,7 +131,7 @@ class TestGeminiRetry(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError) as cm:
             await self.agent_manager._call_gemini_api_internal("test prompt")
         
-        self.assertIn("Gemini API Error 503", str(cm.exception))
+        self.assertIn("Max Retries Exceeded", str(cm.exception))
         self.assertEqual(mock_client_instance.post.call_count, 5)
 
     @patch("httpx.AsyncClient")

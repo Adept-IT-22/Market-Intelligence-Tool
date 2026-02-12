@@ -142,12 +142,20 @@ async def _call_gemini_api_internal(prompt: str) -> str:
                 
                 if response.status_code != 200:
                     logger.warning(f"Gemini API returned {response.status_code}: {response_data}")
-                    # Raise exception for non-200 status so it can be caught
+                    
+                    # Handle retryable errors directly
                     if response.status_code == 429 or response.status_code >= 500:
-                        raise RuntimeError(f"Gemini API Error {response.status_code}: {response_data}")
-                    else:
-                        # 400s are usually client errors (not retryable)
-                        raise ValueError(f"Gemini API Client Error {response.status_code}: {response_data}")
+                        logger.warning(f"Gemini retryable error {response.status_code}. Retrying...")
+                        # Calculate wait time directly here or use a helper, but reusing loop index logic is cleaner if we just continue
+                        # However, we must wait before continuing to avoid tight loop if pure continue usage.
+                        # Actually, better to raise a specific RetryError or handle wait here.
+                        
+                        wait_time = min(60, 2 ** (attempt - 1))
+                        await asyncio.sleep(wait_time)
+                        continue
+
+                    # 400s are usually client errors (not retryable)
+                    raise ValueError(f"Gemini API Client Error {response.status_code}: {response_data}")
                 
                 # Robust parsing of candidates
                 candidates = response_data.get("candidates", [])
@@ -172,19 +180,16 @@ async def _call_gemini_api_internal(prompt: str) -> str:
                 return ret_val
                 
             except Exception as e:
-                last_exception = e
-                # Check retry condition using concrete signals (status codes / exception types)
+                # Check for httpx errors that should trigger retry
                 should_retry = False
                 if isinstance(e, httpx.HTTPStatusError):
-                    status_code = e.response.status_code if e.response is not None else None
-                    # Retry on common transient server/client throttle errors
-                    if status_code in (429, 500, 502, 503, 504):
-                        should_retry = True
+                     if e.response.status_code in [429, 500, 502, 503, 504]:
+                         should_retry = True
                 elif isinstance(e, (httpx.TimeoutException, httpx.TransportError)):
-                    # Retry on network/timeout-related errors
-                    should_retry = True
+                     should_retry = True
+                
                 if attempt < max_attempts and should_retry:
-                    wait_time = min(60, 4 * (2 ** (attempt - 1))) # Exponential backoff
+                    wait_time = min(60, 2 ** (attempt - 1))
                     logger.warning(f"Gemini Attempt #{attempt} failed with {type(e).__name__}: {e}. Retrying in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                     continue
