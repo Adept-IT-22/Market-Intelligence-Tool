@@ -173,10 +173,16 @@ async def _call_gemini_api_internal(prompt: str) -> str:
                 
             except Exception as e:
                 last_exception = e
-                # Check retry condition
-                msg = str(e).lower()
-                should_retry = "429" in msg or "quota" in msg or "limit" in msg or "503" in msg or "socket" in msg or "timeout" in msg or "server error" in msg
-                
+                # Check retry condition using concrete signals (status codes / exception types)
+                should_retry = False
+                if isinstance(e, httpx.HTTPStatusError):
+                    status_code = e.response.status_code if e.response is not None else None
+                    # Retry on common transient server/client throttle errors
+                    if status_code in (429, 500, 502, 503, 504):
+                        should_retry = True
+                elif isinstance(e, (httpx.TimeoutException, httpx.TransportError)):
+                    # Retry on network/timeout-related errors
+                    should_retry = True
                 if attempt < max_attempts and should_retry:
                     wait_time = min(60, 4 * (2 ** (attempt - 1))) # Exponential backoff
                     logger.warning(f"Gemini Attempt #{attempt} failed with {type(e).__name__}: {e}. Retrying in {wait_time}s...")
