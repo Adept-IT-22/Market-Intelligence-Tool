@@ -3,7 +3,6 @@ import sqlite3
 import pandas as pd
 import httpx
 import asyncio
-import time
 from google.auth import default
 from google.auth.transport.requests import Request
 from qdrant_client import QdrantClient
