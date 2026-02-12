@@ -130,7 +130,7 @@ async def _call_gemini_api_internal(prompt: str) -> str:
                 else:
                     logger.info("Starting Gemini API call...")
 
-                response = await client.post(VERTEX_ENDPOINT, headers=headers, json=payload)
+                response = await client.post(VERTEX_ENDPOINT, headers=headers, json=data)
                 
                 try:
                     response_data = response.json()
