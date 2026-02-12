@@ -144,10 +144,10 @@ async def _call_gemini_api_internal(prompt: str) -> str:
                     logger.warning(f"Gemini API returned {response.status_code}: {response_data}")
                     # Raise exception for non-200 status so it can be caught
                     if response.status_code == 429 or response.status_code >= 500:
-                         raise RuntimeError(f"Gemini API Error {response.status_code}: {response_data}")
+                        raise RuntimeError(f"Gemini API Error {response.status_code}: {response_data}")
                     else:
-                         # 400s are usually client errors (not retryable)
-                         raise ValueError(f"Gemini API Client Error {response.status_code}: {response_data}")
+                        # 400s are usually client errors (not retryable)
+                        raise ValueError(f"Gemini API Client Error {response.status_code}: {response_data}")
                 
                 # Robust parsing of candidates
                 candidates = response_data.get("candidates", [])
