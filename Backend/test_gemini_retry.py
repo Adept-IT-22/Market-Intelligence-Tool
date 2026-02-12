@@ -3,7 +3,6 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import asyncio
 import sys
 import os
-import importlib
 
 class TestGeminiRetry(unittest.IsolatedAsyncioTestCase):
     
