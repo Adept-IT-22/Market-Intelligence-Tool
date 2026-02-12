@@ -4,7 +4,6 @@ import pandas as pd
 import httpx
 import asyncio
 import time
-from tenacity import retry, wait_exponential, stop_after_attempt, RetryCallState
 from google.auth import default
 from google.auth.transport.requests import Request
 from qdrant_client import QdrantClient
@@ -104,60 +103,53 @@ def get_access_token() -> str:
             logger.error("No valid GCP credentials OR GEMINI_API_KEY found.")
         return fallback_key
 
-def retry_if_resource_exhausted(exception: BaseException) -> bool:
-    msg = str(exception).lower()
-    return "429" in msg or "quota" in msg or "limit" in msg or "503" in msg
-
-def log_before_gemini(retry_state: RetryCallState):
-    if retry_state.attempt_number > 1:
-        if retry_state.outcome and retry_state.outcome.failed:
-            ex = retry_state.outcome.exception()
-            logger.warning(f"Retrying Gemini call... attempt #{retry_state.attempt_number} due to {type(ex).__name__}: {ex}")
-        else:
-            logger.info(f"Retrying Gemini call... attempt #{retry_state.attempt_number} (prev failed)")
-    else:
-        logger.info("Starting Gemini API call...")
-
 async def _call_gemini_api_internal(prompt: str) -> str:
-    # Explicit Retry Loop to replace tenacity
-    attempt = 0
+    """Internal function to call Gemini API with explicit retries."""
     max_attempts = 5
+    last_exception = None
     
-    while attempt < max_attempts:
-        attempt += 1
-        try:
-            token = get_access_token()
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            }
-            payload = {
-                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.0,
-                    "responseMimeType": "application/json" if "JSON" in prompt.upper() or "Output JSON:" in prompt else "text/plain"
-                },
-            }
-            
-            if attempt > 1:
-                logger.info(f"Retrying Gemini call... attempt #{attempt}")
-            else:
-                logger.info("Starting Gemini API call...")
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.0,
+            "responseMimeType": "application/json" if "JSON" in prompt.upper() or "Output JSON:" in prompt else "text/plain"
+        },
+    }
 
-            async with httpx.AsyncClient(timeout=120.0) as client:
+    # Reuse client across attempts for connection pooling
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        for attempt in range(1, max_attempts + 1):
+            try:
+                if attempt > 1:
+                    logger.info(f"Retrying Gemini call... attempt #{attempt}")
+                else:
+                    logger.info("Starting Gemini API call...")
+
                 response = await client.post(VERTEX_ENDPOINT, headers=headers, json=payload)
                 
                 try:
                     response_data = response.json()
                 except Exception as e:
+                    # JSON parsing failure is usually fatal unless server error text
                     logger.error(f"Failed to parse Gemini response as JSON. Status: {response.status_code}, Error: {e}, Payload: {response.text[:500]}")
-                    response.raise_for_status()
-                    raise ValueError(f"Gemini returned non-JSON response: {response.text[:500]}")
+                    if response.status_code >= 500:
+                        raise ValueError(f"Server Error {response.status_code}: {response.text[:500]}") from e
+                    raise ValueError(f"Gemini returned non-JSON response: {response.text[:500]}") from e
                 
                 if response.status_code != 200:
                     logger.warning(f"Gemini API returned {response.status_code}: {response_data}")
-                    response.raise_for_status()
-                    
+                    # Raise exception for non-200 status so it can be caught
+                    if response.status_code == 429 or response.status_code >= 500:
+                         raise RuntimeError(f"Gemini API Error {response.status_code}: {response_data}")
+                    else:
+                         # 400s are usually client errors (not retryable)
+                         raise ValueError(f"Gemini API Client Error {response.status_code}: {response_data}")
+                
                 # Robust parsing of candidates
                 candidates = response_data.get("candidates", [])
                 if not candidates:
@@ -180,21 +172,31 @@ async def _call_gemini_api_internal(prompt: str) -> str:
                 ret_val = content["parts"][0]["text"]
                 return ret_val
                 
-        except Exception as e:
-            # Check if we should retry
-            msg = str(e).lower()
-            should_retry = "429" in msg or "quota" in msg or "limit" in msg or "503" in msg or "socket" in msg or "timeout" in msg
-            
-            if attempt < max_attempts and should_retry:
-                wait_time = min(60, 4 * (2 ** (attempt - 1))) # Exponential backoff
-                logger.warning(f"Gemini Attempt #{attempt} failed with {type(e).__name__}: {e}. Retrying in {wait_time}s...")
-                await asyncio.sleep(wait_time)
-                continue
-            
-            logger.error(f"Gemini Attempt #{attempt} failed FATALLY with {type(e).__name__}: {e}")
-            raise
+            except Exception as e:
+                last_exception = e
+                # Check retry condition
+                msg = str(e).lower()
+                should_retry = "429" in msg or "quota" in msg or "limit" in msg or "503" in msg or "socket" in msg or "timeout" in msg or "server error" in msg
+                
+                if attempt < max_attempts and should_retry:
+                    wait_time = min(60, 4 * (2 ** (attempt - 1))) # Exponential backoff
+                    logger.warning(f"Gemini Attempt #{attempt} failed with {type(e).__name__}: {e}. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                # If not retryable or max attempts, log as error
+                logger.error(f"Gemini Attempt #{attempt} failed FATALLY with {type(e).__name__}: {e}")
+                raise
 
-    raise RuntimeError("Gemini Max Retries Exceeded")
+            except BaseException as e:
+                # Catch cancellation/system exit and re-raise immediately without retry
+                logger.error(f"Gemini call INTERRUPTED/CANCELLED: {type(e).__name__}: {e}")
+                raise
+
+    # If loop finishes without success (unreachable if last_exception logic is perfect, but safe fallback)
+    if last_exception:
+        raise last_exception
+    raise RuntimeError("Gemini Max Retries Exceeded (Unknown Error)")
 
 async def call_gemini_async(prompt: str) -> str:
     global last_call
