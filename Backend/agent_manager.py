@@ -115,7 +115,7 @@ async def _call_gemini_api_internal(prompt: str) -> str:
     data = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 0.2,
+            "temperature": 0.0,
             "maxOutputTokens": 8192,
             "responseMimeType": "application/json" if "JSON" in prompt.upper() or "Output JSON:" in prompt else "text/plain"
         },
@@ -350,18 +350,27 @@ class AgentManager:
             conn = sqlite3.connect(self.database_path)
             try:
                 # Improved Keyword Search: Rank by number of match hits
-                match_scores = " + ".join([f"(case when Title LIKE ? then 1 else 0 end)" for _ in keywords])
-                params = [f"%{k}%" for k in keywords]
-                # Filter to only rows that have at least one match
-                conditions = " OR ".join([f"Title LIKE ?" for _ in keywords])
-                params_full = params + params
+                # Increase weight for Title significantly over Summary since Summaries might be generic
+                match_scores = " + ".join([f"(case when Title LIKE ? then 5 else 0 end + case when Summary LIKE ? then 1 else 0 end)" for _ in keywords])
+                # Double params for Title and Summary
+                params_for_scores = []
+                for k in keywords:
+                    params_for_scores.extend([f"%{k}%", f"%{k}%"])
+                
+                # Filter to only rows that have at least one match in Title or Summary
+                conditions = " OR ".join([f"Title LIKE ? OR Summary LIKE ?" for _ in keywords])
+                params_for_where = []
+                for k in keywords:
+                    params_for_where.extend([f"%{k}%", f"%{k}%"])
+                
+                params_full = params_for_scores + params_for_where
                 
                 query = f"""
                     SELECT table_name, ({match_scores}) as score 
                     FROM Master 
                     WHERE {conditions} 
                     ORDER BY score DESC 
-                    LIMIT 20
+                    LIMIT 40
                 """
                 
                 df_kw = pd.read_sql_query(query, conn, params=params_full)
@@ -370,12 +379,12 @@ class AgentManager:
                     score = row['score']
                     keyword_candidates.add(table_name)
                     keyword_scores[table_name] = score
-                    # Auto-include tables matching 2+ keywords (high confidence)
-                    if score >= 2:
+                    # Auto-include tables with high Title score
+                    if score >= 5:
                         high_confidence_keyword_tables.add(table_name)
                 logger.info(f"Keyword search found {len(keyword_candidates)} candidates "
-                           f"({len(high_confidence_keyword_tables)} high-confidence): "
-                           f"{df_kw.to_dict(orient='records')}")
+                           f"({len(high_confidence_keyword_tables)} high-confidence)")
+
             except Exception as e:
                 logger.warning(f"Keyword search failed: {e}")
             conn.close()
@@ -413,7 +422,9 @@ class AgentManager:
         system_prompt = (
             "You are a Senior Strategic Researcher. "
             "Review the available data sources and select the TOP 8 tables most relevant to the query. "
-            "Prioritize sources with '[HIGH CONFIDENCE]' if they match the query well. "
+            "CRITICAL: Many 'Summary' fields are generic marketing text. ALWAYS prioritize the 'Title' as it contains the actual document name and true topic. "
+            "If a Title suggests relevance to Kenya, Economics, Agriculture, or Industry, SELECT the table even if the summary says 'marketing'. "
+            "Prioritize sources with '[HIGH CONFIDENCE]' if they match the query keywords. "
             "Return a COMMA-SEPARATED list of 'table_name' strings only."
         )
         
@@ -428,9 +439,18 @@ class AgentManager:
 
         try:
             content = call_gemini_sync(user_prompt)
-            content = content.strip()
-            # Clean
-            routing_tables = [t.strip().strip('"').strip("'") for t in content.split(',') if t.strip()]
+            logger.info(f"Level 1 Raw Response: {content.strip()}")
+            # CLEANING: Handle LLM conversational drift (e.g., "The top tables are: t1, t2")
+            # Extract anything that looks like a table name (route_...)
+            possible_tables = re.findall(r'route_[a-z0-9_]+', content)
+            if not possible_tables:
+                 # Fallback to comma split if regex fails but strip carefully
+                 routing_tables = [t.strip().strip('"').strip("'").strip("`").split(':')[-1].strip() for t in content.split(',') if t.strip()]
+            else:
+                 routing_tables = possible_tables
+            
+            # Clean invalid segments from split fallback
+            routing_tables = [t for t in routing_tables if t.startswith('route_')]
             
             # FINAL CAP: Ensure no more than 8 tables are processed by Level 2
             if len(routing_tables) > 8:
@@ -445,12 +465,12 @@ class AgentManager:
                          routing_tables.append(kw_table)
 
             logger.info(f"Level 1 Selected: {routing_tables}")
-            return routing_tables
+            return routing_tables, master_text
         except Exception as e:
             logger.error(f"Master Routing failed: {e}")
             # Fallback: return high-confidence keyword matches capped at 8
             fallback = [t for t in high_confidence_keyword_tables if re.match(r'^[a-z0-9_]+$', t)]
-            return fallback[:8]
+            return fallback[:8], master_text
 
     def get_routing_response(self, routing_tables: list):
         """
@@ -520,7 +540,9 @@ class AgentManager:
             content = call_gemini_sync(user_prompt)
             
             try:
-                result = json.loads(content)
+                # CLEANING: Strip markdown code blocks if the LLM adds them
+                content_clean = re.sub(r'```json\s*|\s*```', '', content).strip()
+                result = json.loads(content_clean)
                 logger.info(f"Level 2 Selected: {result}")
                 return result
             except json.JSONDecodeError as je:
@@ -537,7 +559,8 @@ class AgentManager:
         """
         logger.info("Level 3: Fetching Detail Content...")
         context = ""
-        max_chars = 15000 # Stay safe within Groq's 6k token limit (~18k-24k chars)
+        max_chars = 200000 
+        points_hydrated = 0
         
         # 1. Fetch SQL Details
         sql_tables = selection.get('sql_tables', [])
@@ -584,7 +607,9 @@ class AgentManager:
                                  )
                                  for p in points:
                                      txt = p.payload.get('text', '')
-                                     if txt: fetched_text_content.append(f"[Content from Point {p.id}]:\n{txt}")
+                                     if txt: 
+                                         fetched_text_content.append(f"[Content from Point {p.id}]:\n{txt}")
+                                         points_hydrated += 1
                              except Exception as q_err:
                                  logger.error(f"Failed to hydrate Qdrant points for table {table}: {q_err}")
 
@@ -608,7 +633,7 @@ class AgentManager:
         if qdrant_ids and len(context) < max_chars:
             try:
                 # Limit number of points to fetch to stay under tokens
-                fetch_limit = 15
+                fetch_limit = 40
                 safe_ids = qdrant_ids[:fetch_limit]
                 
                 points = self.qdrant_client.retrieve(
@@ -627,17 +652,40 @@ class AgentManager:
                         context += point_text[:max_chars - len(context)] + "...[Truncated]"
                         break
                     context += point_text
+                    points_hydrated += 1
             except Exception as e:
                 logger.error(f"Error retrieving Qdrant points: {e}")
                 
+        logger.info(f"Level 3 Hydration Complete: {points_hydrated} chunks retrieved.")
         return context
 
     def pipeline(self):
         logger.info("Starting V2 3-Level Implementation Plan Pipeline")
         
         # Step 1: Master -> Routing Tables
-        routing_tables = self.get_master_routing()
+        routing_tables, master_metadata = self.get_master_routing()
         
+        # --- NEW: General Query Check ---
+        # If the query is about "what data do you have" or very general, skip L2/L3
+        general_keywords = [
+            "what data", "available data", "what do you have", "show me your data", 
+            "list your sources", "what is this tool", "summary of the data",
+            "overview of the data", "what does the data", "data you have show"
+        ]
+        is_general = any(kw in self.query.lower() for kw in general_keywords)
+        
+        if is_general:
+            logger.info("General Query Detected: Skipping Level 2 & 3 retrieval.")
+            return self.get_final_response(
+                [], 
+                {
+                    "Hierarchical Data": f"Summary of Available Data Sources:\n{master_metadata}", 
+                    "Semantic Data": "",
+                    "Routing Tables": routing_tables,
+                    "Is General": True
+                }
+            )
+
         # Step 2: Routing Tables -> Specific Details
         selection = self.get_routing_response(routing_tables)
         
@@ -645,15 +693,30 @@ class AgentManager:
         detail_context = self.get_detail_content(selection)
         
         # Step 4: Hybrid Search (Safety Net) - Run standard Semantic Search as well
-        # This catches things the hierarchical drill-down might miss
-        semantic_results = self.search_qdrant(top_k=3)
+        # Only run if hierarchical found little data OR if query is very general
         semantic_context = ""
+        semantic_results = []
+        
+        # Determine if we should suppress the safety net
+        # If we have successful hydration from routed tables, we reduce noise
+        is_research_query = len(self.query.split()) > 4
+        hierarchical_success = len(detail_context) > 2000
+        
+        if is_research_query and hierarchical_success:
+            logger.info("Strong Hierarchical Context found: Suppressing Safety Net noise.")
+            safety_top_k = 0 # Skip semantic search to keep answer focused on the specific research documents
+        else:
+            safety_top_k = 2 if len(detail_context) > 5000 else 5
+            semantic_results = self.search_qdrant(top_k=safety_top_k)
+
         for point in semantic_results:
              payload = point.payload
              text = payload.get('text', str(payload))
              source_link = payload.get('source', 'Unknown')
              source_name = self._get_display_name(source_link)
              semantic_context += f"- Document: {source_name} (URI: {source_link})\n  Content: {text}\n\n"
+
+        logger.info(f"Context sizes: Hierarchical={len(detail_context)} chars, Semantic={len(semantic_context)} chars")
 
         # Final Synthesis (Passing routing_tables for transparency)
         return self.get_final_response(
@@ -672,6 +735,7 @@ class AgentManager:
         hierarchical_data = context_dict.get("Hierarchical Data", "")
         semantic_data = context_dict.get("Semantic Data")
         routing_tables = context_dict.get("Routing Tables", [])
+        is_general = context_dict.get("Is General", False)
         
         # Fallback if semantic data missing but search results exist
         if not semantic_data and search_results:
@@ -722,10 +786,6 @@ class AgentManager:
         
         try:
             content = call_gemini_sync(f"{system_prompt}\n\n{user_prompt}")
-            
-            # Inject the thought trace at the top of the answer for transparency
-            if thought_trace:
-                return f"{thought_trace}{content}"
             return content
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
