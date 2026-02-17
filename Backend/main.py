@@ -19,7 +19,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger()
 
 app = Flask(__name__)
-CORS(app)
+# Enable CORS for all origins, methods, and headers to support multiple devices on staging
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 # Initialize chat tables
 init_chat_tables()
@@ -262,25 +263,29 @@ def upload_file():
     """
     start_time = time.perf_counter()
     
-    if 'file' not in request.files:
-        return {"error": "No file part in the request"}, 400
-    
-    file = request.files['file']
-    
-    if file.filename == '':
-        return {"error": "No file selected"}, 400
-    
+    # Support for both Multipart Form (Frontend) and Raw Binary (Power Automate)
+    if 'file' in request.files:
+        file = request.files['file']
+        if file.filename == '':
+            return {"error": "No file selected"}, 400
+        filename = file.filename
+        content = file.read()
+    else:
+        # Fallback for Power Automate (Raw Body)
+        # Use a custom header for the filename, or a default
+        filename = request.headers.get('X-File-Name', f"upload_{int(time.time())}.pdf")
+        content = request.data
+        if not content:
+            return {"error": "No file content found in request body"}, 400
+
     # Validate file type
-    if not allowed_file(file.filename):
+    if not allowed_file(filename):
         return {
             "error": f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
         }, 400
     
     # Validate file size
-    file.seek(0, os.SEEK_END)
-    file_size = file.tell()
-    file.seek(0)
-    
+    file_size = len(content)
     if file_size > MAX_FILE_SIZE_BYTES:
         return {
             "error": f"File too large. Maximum size: {MAX_FILE_SIZE_MB}MB"
@@ -288,13 +293,14 @@ def upload_file():
     
     # Save the file
     from werkzeug.utils import secure_filename
-    filename = secure_filename(file.filename)
+    clean_filename = secure_filename(filename)
     timestamp = int(time.time())
-    unique_filename = f"{timestamp}_{filename}"
+    unique_filename = f"{timestamp}_{clean_filename}"
     file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
     
     try:
-        file.save(file_path)
+        with open(file_path, "wb") as f:
+            f.write(content)
         logger.info(f"File uploaded: {unique_filename} ({file_size / 1024:.1f} KB)")
         
         # --- Trigger Automatic Ingestion ---
