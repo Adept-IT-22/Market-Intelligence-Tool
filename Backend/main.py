@@ -211,15 +211,26 @@ def run_query():
         logger.info(f"Session: {session_id}, User: {getattr(g, 'user_id', 'Guest')}")
 
         # If session_id is provided and user is logged in, save user message
-        if session_id and getattr(g, 'user_id', None):
+        user_id = getattr(g, 'user_id', None)
+        if session_id and user_id:
             try:
                 add_chat_message(session_id, 'user', user_query)
             except Exception as e:
                 logger.warning(f"Failed to save user message: {e}")
+        else:
+            logger.info("Guest user: Skipping chat history persistence.")
+
+        # Fetch chat history for context
+        chat_history = []
+        if session_id:
+            try:
+                chat_history = get_chat_messages(session_id)
+            except Exception as e:
+                logger.warning(f"Failed to fetch chat history: {e}")
 
         # Initialize Agent and Pipeline
         logger.info("Initializing AgentManager...")
-        manager = AgentManager(query=user_query)
+        manager = AgentManager(query=user_query, chat_history=chat_history)
         
         logger.info("Executing Pipeline...")
         results = manager.pipeline()
@@ -229,14 +240,20 @@ def run_query():
         response_text = str(results)
         
         # If session_id is provided and user is logged in, save assistant message
-        if session_id and getattr(g, 'user_id', None):
+        if session_id and user_id:
             try:
                 add_chat_message(session_id, 'assistant', response_text, round(duration, 2))
             except Exception as e:
                 logger.warning(f"Failed to save assistant message: {e}")
 
         logger.info(f"Query handled successfully in {duration:.2f}s")
-        return jsonify({"Results": response_text, "execution_time": round(duration, 2)})
+        
+        # Append sign-up encouragement for guests
+        final_response = response_text
+        if not user_id:
+            final_response += '<p style="font-size: 10px; color: gray; text-align: center; margin-top: 20px;"><em>Note: Your chat history is not being saved. <a href="/auth/login" style="color: inherit;">Sign up or Log in</a> to keep track of your research sessions.</em></p>'
+
+        return jsonify({"Results": final_response, "execution_time": round(duration, 2)})
 
     except Exception as e:
         logger.exception("FATAL ERROR in /query endpoint")

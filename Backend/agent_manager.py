@@ -42,8 +42,8 @@ logger.info(f"Gemini initialized for Project: {PROJECT_ID} in Region: {REGION}")
 # --- Concurrency & Rate Limiting ---
 MAX_CONCURRENT_REQUEST = 1
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUEST)
-# Increased to 10s to be extra safe against Vertex sustained rate limits
-RATE_LIMIT_SECONDS = 10 
+# Accelerated to 0.1s to allow fast RAG pipeline traversal
+RATE_LIMIT_SECONDS = 0.1 
 gemini_lock = asyncio.Lock()
 last_call = 0
 
@@ -237,12 +237,14 @@ class AgentManager:
         llm_model_name: str = GEMINI_MODEL_NAME,
         database_path: str = DATABASE_PATH,
         collection_name: str = COLLECTION_NAME,
-        query: str = 'No prompt entered.'
+        query: str = 'No prompt entered.',
+        chat_history: list = None
     ):
         self.llm_model_name = llm_model_name
         self.database_path = database_path
         self.collection_name = collection_name
         self.query = query
+        self.chat_history = chat_history or []
 
         # Initialize/Get Embeddings
         self.embeddings = get_embeddings_model()
@@ -516,6 +518,9 @@ class AgentManager:
         conn.close()
 
         combined_routing_data = "".join(combined_routing_sections)
+        if not combined_routing_sections:
+            logger.info("Level 2: No content found in routing tables.")
+            return {'sql_tables': [], 'qdrant_ids': []}
 
         if not combined_routing_data:
             return {'sql_tables': [], 'qdrant_ids': []}
@@ -659,9 +664,40 @@ class AgentManager:
         logger.info(f"Level 3 Hydration Complete: {points_hydrated} chunks retrieved.")
         return context
 
+    def _check_fast_path(self):
+        """
+        Detects if the query is a simple greeting or small talk that doesn't 
+        require a heavy RAG search.
+        """
+        q = self.query.lower().strip().strip('?').strip('!')
+        
+        # Simple keywords for greetings/small talk
+        fast_path_keywords = [
+            'hi', 'hello', 'hey', 'yo', 'greetings', 'testing', 
+            'thanks', 'thank you', 'how are you', 'howdy',
+            'good morning', 'good afternoon', 'good evening',
+            'morning', 'ok', 'okay', 'cool', 'nice', 'great'
+        ]
+        
+        # Exact match or query is just a greeting phrase
+        if q in fast_path_keywords:
+            return True
+            
+        # Check if individual words are greetings (for things like "Hey there")
+        words = q.split()
+        if len(words) <= 3 and any(w in {'hi', 'hello', 'hey', 'yo', 'hola', 'thanks', 'ok', 'cool'} for w in words):
+            return True
+            
+        return False
+
     def pipeline(self):
         logger.info("Starting V2 3-Level Implementation Plan Pipeline")
         
+        # Check for Fast Path (Greetings/Small Talk)
+        if self._check_fast_path():
+            logger.info("Fast Path Triggered: Greeting/Small Talk detected.")
+            return self.get_final_response([], {"Is Fast Path": True})
+
         # Step 1: Master -> Routing Tables
         routing_tables, master_metadata = self.get_master_routing()
         
@@ -736,6 +772,15 @@ class AgentManager:
         semantic_data = context_dict.get("Semantic Data")
         routing_tables = context_dict.get("Routing Tables", [])
         is_general = context_dict.get("Is General", False)
+        is_fast_path = context_dict.get("Is Fast Path", False)
+        
+        if is_fast_path:
+             # Very simple prompt for greetings to be fast and personal
+             try:
+                 content = call_gemini_sync(f"The user said: '{self.query}'. Reply politely and professionally as the Adept Market Intelligence Assistant. Mention that you are ready to help with market research or document analysis.")
+                 return content
+             except:
+                 return "Hello! I am your Adept Market Intelligence Assistant. How can I help you with your research today?"
         
         # Fallback if semantic data missing but search results exist
         if not semantic_data and search_results:
@@ -774,9 +819,18 @@ class AgentManager:
             "   - WRONG: • [ProjectSheet.pdf](C:\\path) (C:\\path\\to\\file.pdf)\n"
         )
         
+        # Prepare Chat History for prompt
+        history_text = ""
+        if self.chat_history:
+            # Take last 6 messages to avoid context overflow but maintain continuity
+            recent_history = self.chat_history[-6:]
+            history_lines = [f"{m['role'].upper()}: {m['content']}" for m in recent_history]
+            history_text = "=== CONVERSATION HISTORY ===\n" + "\n".join(history_lines) + "\n\n"
+
         user_prompt = f"""
         User Query: "{self.query}"
         
+        {history_text}
         === SEARCH CONTEXT ===
         {hierarchical_data}
         {semantic_data}
