@@ -263,26 +263,73 @@ def upload_file():
     """
     start_time = time.perf_counter()
     
-    # Support for both Multipart Form (Frontend) and Raw Binary (Power Automate)
-    if 'file' in request.files:
-        file = request.files['file']
-        if file.filename == '':
-            return {"error": "No file selected"}, 400
-        filename = file.filename
-        content = file.read()
-    else:
-        # Fallback for Power Automate (Raw Body)
-        # Use a custom header for the filename, or a default
-        filename = request.headers.get('X-File-Name', f"upload_{int(time.time())}.pdf")
-        content = request.data
-        if not content:
-            return {"error": "No file content found in request body"}, 400
+    # Log incoming request details for debugging
+    logger.info(f"Upload request - Content-Type: {request.content_type}, Content-Length: {request.content_length}, Headers: X-File-Name={request.headers.get('X-File-Name', 'MISSING')}")
+    
+    # Support for Multipart Form (Frontend), Raw Binary, and JSON (Power Automate)
+    content = b''
+    filename = f"upload_{int(time.time())}.pdf"
+    
+    try:
+        if 'file' in request.files:
+            file = request.files['file']
+            if file.filename == '':
+                return {"error": "No file selected"}, 400
+            filename = file.filename
+            content = file.read()
+        else:
+            # Handle API/Power Automate uploads
+            # 1. Get raw data first
+            raw_body = request.get_data()
+            
+            # 2. Try to parse as JSON regardless of Content-Type (Power Automate often sends mismatched headers)
+            is_valid_json = False
+            try:
+                # Only try parsing if it looks like JSON to avoid overhead/errors on large binaries
+                if raw_body and raw_body.strip().startswith(b'{'):
+                    import json
+                    data = json.loads(raw_body)
+                    is_valid_json = True
+                    
+                    logger.info(f"JSON upload - Keys received: {list(data.keys())}")
+                    filename = request.headers.get('X-File-Name', data.get('fileName', filename))
+                    body = data.get('$content', data.get('content', data.get('body', '')))
+                    
+                    # Decode base64 if present
+                    import base64
+                    try:
+                        content = base64.b64decode(body) if body else b''
+                        logger.info(f"JSON upload - Decoded {len(content)} bytes successfully")
+                    except Exception as b64_err:
+                        # Fallback: maybe it's not base64 but raw string?
+                        logger.warning(f"JSON base64 decode failed, using raw body value: {b64_err}")
+                        content = body.encode('utf-8') if isinstance(body, str) else b''
+            except Exception as json_err:
+                logger.info(f"Not valid JSON (treating as binary): {json_err}")
+            
+            # 3. If not JSON, treat raw body as the file content
+            if not is_valid_json:
+                content = raw_body
+                filename = request.headers.get('X-File-Name', filename)
+                logger.info(f"Binary upload - Content length: {len(content)} bytes")
 
-    # Validate file type
+    except Exception as parse_err:
+        logger.error(f"Upload parsing error: {parse_err}")
+        return {"error": f"Failed to parse upload: {str(parse_err)}"}, 400
+    
+    if not content:
+        logger.error(f"Upload failed: No content received. Content-Type: {request.content_type}")
+        return {"error": "No file content found in request body"}, 400
+
+    # Validate file type (skip for API uploads without proper filename)
     if not allowed_file(filename):
-        return {
-            "error": f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
-        }, 400
+        # If filename has no extension, default to .pdf
+        if '.' not in filename:
+            filename = filename + '.pdf'
+        elif not allowed_file(filename):
+            return {
+                "error": f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+            }, 400
     
     # Validate file size
     file_size = len(content)
@@ -310,13 +357,14 @@ def upload_file():
             ingester = DataIngester()
             
             # Determine type
-            ext = filename.rsplit('.', 1)[1].lower()
+            ext = clean_filename.rsplit('.', 1)[1].lower() if '.' in clean_filename else 'pdf'
             type_map = {
                 'xlsx': 'excel', 'xls': 'excel', 
                 'pdf': 'pdf', 'docx': 'docx', 'pptx': 'pptx',
+                'txt': 'pdf', 'csv': 'excel', 'md': 'pdf',
                 'png': 'image', 'jpg': 'image', 'jpeg': 'image', 'webp': 'image'
             }
-            f_type = type_map.get(ext, 'auto')
+            f_type = type_map.get(ext, 'pdf')
             
             # Process
             ingester.process_input(
