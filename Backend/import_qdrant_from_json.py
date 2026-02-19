@@ -51,7 +51,7 @@ def import_data():
         )
         print(f"Uploaded batch {i} - {i+len(batch)}")
         
-    print("✅ Migration complete!")
+    print("[DONE] Migration complete!")
 
 if __name__ == "__main__":
     import_data()
