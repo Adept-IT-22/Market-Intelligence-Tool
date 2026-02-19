@@ -779,7 +779,7 @@ class AgentManager:
              try:
                  content = call_gemini_sync(f"The user said: '{self.query}'. Reply politely and professionally as the Adept Market Intelligence Assistant. Mention that you are ready to help with market research or document analysis.")
                  return content
-             except:
+             except Exception:
                  return "Hello! I am your Adept Market Intelligence Assistant. How can I help you with your research today?"
         
         # Fallback if semantic data missing but search results exist
