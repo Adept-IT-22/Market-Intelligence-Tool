@@ -355,6 +355,15 @@ def upload_file():
             "error": f"File too large. Maximum size: {MAX_FILE_SIZE_MB}MB"
         }, 400
     
+    # Decode information
+    department = "General"
+    if 'data' in locals() and isinstance(data, dict):
+         # Extract department from JSON (Power Automate)
+         department = data.get('source', data.get('dept', data.get('category', 'General')))
+    elif request.args.get('source'):
+         # Extract from Query Param (if used)
+         department = request.args.get('source')
+
     # Save the file
     from werkzeug.utils import secure_filename
     clean_filename = secure_filename(filename)
@@ -365,12 +374,12 @@ def upload_file():
     try:
         with open(file_path, "wb") as f:
             f.write(content)
-        logger.info(f"File uploaded: {unique_filename} ({file_size / 1024:.1f} KB)")
+        logger.info(f"File uploaded: {unique_filename} ({file_size / 1024:.1f} KB) -> Dept: {department}")
         
         # --- Trigger Automatic Ingestion ---
         try:
             from ingest_data import DataIngester
-            logger.info(f"Auto-ingesting file: {unique_filename}")
+            logger.info(f"Auto-ingesting file: {unique_filename} for {department}")
             ingester = DataIngester()
             
             # Determine type
@@ -388,8 +397,9 @@ def upload_file():
                 input_path=file_path,
                 source_type=f_type,
                 title=filename,
-                sectors="General", # Default sector
-                summary="Uploaded via API"
+                sectors="General", 
+                summary="Uploaded via SharePoint Automation",
+                department=department
             )
             logger.info("Auto-ingestion successful.")
             
