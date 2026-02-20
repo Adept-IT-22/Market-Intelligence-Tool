@@ -211,6 +211,20 @@ async def _call_gemini_api_internal(prompt: str) -> str:
         raise last_exception
     raise RuntimeError("Gemini Max Retries Exceeded (Unknown Error)")
 
+async def call_gemini_async(prompt: str) -> str:
+    global last_call
+    async with semaphore:
+        async with gemini_lock:
+            loop = asyncio.get_event_loop()
+            now = loop.time()
+            elapsed = now - last_call
+            if elapsed < RATE_LIMIT_SECONDS:
+                sleep_time = RATE_LIMIT_SECONDS - elapsed
+                logger.info(f"Rate limit: sleeping {sleep_time:.1f}s")
+                await asyncio.sleep(sleep_time)
+            last_call = loop.time()
+        return await _call_gemini_api_internal(prompt)
+
 async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None]:
     """Internal function to call Gemini API with streaming."""
     token = get_access_token()
@@ -226,7 +240,7 @@ async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None
         },
     }
 
-    # Vertical endpoint for streaming
+    # Vertex endpoint for streaming
     stream_endpoint = VERTEX_ENDPOINT.replace(":generateContent", ":streamGenerateContent")
     
     async with httpx.AsyncClient(timeout=120.0) as client:
@@ -237,20 +251,15 @@ async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None
                 yield "Error connecting to Gemini stream."
                 return
 
-            # Note: Vertex AI stream returns an array of JSON objects
             import json
             buffer = ""
             async for chunk in response.aiter_text():
                 buffer += chunk
                 while True:
-                    # Very basic JSON streaming parser for Vertex response format
-                    # Real implementation might need to handle [ {candidate...}, {candidate...} ] structure
                     try:
-                        # Find the first complete JSON object in the buffer
                         start = buffer.find('{')
                         if start == -1: break
                         
-                        # Find closing brace (this is naive but works for well-formed streaming JSON parts)
                         depth = 0
                         end = -1
                         for i in range(start, len(buffer)):
@@ -260,7 +269,7 @@ async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None
                                 end = i + 1
                                 break
                         
-                        if end == -1: break # Incomplete object
+                        if end == -1: break
                         
                         obj_str = buffer[start:end]
                         buffer = buffer[end:].strip()
@@ -278,7 +287,6 @@ async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None
 async def call_gemini_stream_async(prompt: str) -> Generator[str, None, None]:
     async with semaphore:
         async with gemini_lock:
-            # We don't rate limit streaming as strictly since it's one long request
             pass
         async for chunk in _call_gemini_stream_internal(prompt):
             yield chunk

@@ -1,4 +1,5 @@
-from flask import Flask, request, g, jsonify
+from flask import Flask, request, g, jsonify, Response
+import json
 from flask_cors import CORS
 import time
 import os
@@ -199,7 +200,7 @@ def run_query():
 
         user_query = data.get("query")
         session_id = data.get("session_id")
-        stream = data.get("stream", True) # Default to streaming
+        stream = data.get("stream", False) # Default to non-streaming until frontend supports SSE
 
         if not user_query: return jsonify({"error": "Missing 'query' field"}), 400
 
