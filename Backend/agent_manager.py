@@ -941,6 +941,9 @@ class AgentManager:
 
         system_prompt = (
             "You are an expert Market Intelligence Analyst for Adept Technologies Ltd. "
+            "COMPANY CONTEXT: Adept Technologies Ltd. is headquartered in Nairobi, Kenya. "
+            "When users refer to 'abroad', 'international', or 'overseas', they mean OUTSIDE Kenya. "
+            "'Local' means within Kenya. Always interpret geographic terms relative to Kenya as the home base.\n\n"
             "Synthesize the provided data to answer the User Query accurately. "
             "Formatting Rules:\n"
             "1. Use clear, professional Markdown.\n"
