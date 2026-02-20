@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from typing import Optional, Any, Generator
 from concurrent.futures import ThreadPoolExecutor
 import queue
+import threading
 
 load_dotenv()
 
@@ -42,12 +43,10 @@ VERTEX_ENDPOINT = (
 logger.info(f"Gemini initialized for Project: {PROJECT_ID} in Region: {REGION}")
 
 # --- Concurrency & Rate Limiting ---
-MAX_CONCURRENT_REQUEST = 1
-semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUEST)
-# Accelerated to 0.1s to allow fast RAG pipeline traversal
-RATE_LIMIT_SECONDS = 0.1 
-gemini_lock = asyncio.Lock()
-last_call = 0
+# Thread-safe rate limiting (no asyncio locks - they break across Flask threads)
+RATE_LIMIT_SECONDS = 0.1
+_gemini_lock = threading.Lock()
+_last_call_time = 0
 
 # Qdrant Configuration
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
@@ -212,18 +211,16 @@ async def _call_gemini_api_internal(prompt: str) -> str:
     raise RuntimeError("Gemini Max Retries Exceeded (Unknown Error)")
 
 async def call_gemini_async(prompt: str) -> str:
-    global last_call
-    async with semaphore:
-        async with gemini_lock:
-            loop = asyncio.get_event_loop()
-            now = loop.time()
-            elapsed = now - last_call
-            if elapsed < RATE_LIMIT_SECONDS:
-                sleep_time = RATE_LIMIT_SECONDS - elapsed
-                logger.info(f"Rate limit: sleeping {sleep_time:.1f}s")
-                await asyncio.sleep(sleep_time)
-            last_call = loop.time()
-        return await _call_gemini_api_internal(prompt)
+    """Call Gemini with thread-safe rate limiting."""
+    global _last_call_time
+    with _gemini_lock:
+        import time as _time
+        now = _time.time()
+        elapsed = now - _last_call_time
+        if elapsed < RATE_LIMIT_SECONDS:
+            _time.sleep(RATE_LIMIT_SECONDS - elapsed)
+        _last_call_time = _time.time()
+    return await _call_gemini_api_internal(prompt)
 
 async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None]:
     """Internal function to call Gemini API with streaming."""
@@ -285,11 +282,8 @@ async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None
                         break
 
 async def call_gemini_stream_async(prompt: str) -> Generator[str, None, None]:
-    async with semaphore:
-        async with gemini_lock:
-            pass
-        async for chunk in _call_gemini_stream_internal(prompt):
-            yield chunk
+    async for chunk in _call_gemini_stream_internal(prompt):
+        yield chunk
 
 def call_gemini_sync(prompt: str) -> str:
     """Synchronous wrapper for agent_manager."""
