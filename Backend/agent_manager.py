@@ -13,7 +13,9 @@ import logging
 import json
 import re
 from urllib.parse import urlparse
-from typing import Optional, Any
+from typing import Optional, Any, Generator
+from concurrent.futures import ThreadPoolExecutor
+import queue
 
 load_dotenv()
 
@@ -209,19 +211,77 @@ async def _call_gemini_api_internal(prompt: str) -> str:
         raise last_exception
     raise RuntimeError("Gemini Max Retries Exceeded (Unknown Error)")
 
-async def call_gemini_async(prompt: str) -> str:
-    global last_call
+async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None]:
+    """Internal function to call Gemini API with streaming."""
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    data = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.0,
+            "maxOutputTokens": 8192,
+        },
+    }
+
+    # Vertical endpoint for streaming
+    stream_endpoint = VERTEX_ENDPOINT.replace(":generateContent", ":streamGenerateContent")
+    
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        async with client.stream("POST", stream_endpoint, headers=headers, json=data) as response:
+            if response.status_code != 200:
+                err_text = await response.aread()
+                logger.error(f"Gemini Streaming Error {response.status_code}: {err_text}")
+                yield "Error connecting to Gemini stream."
+                return
+
+            # Note: Vertex AI stream returns an array of JSON objects
+            import json
+            buffer = ""
+            async for chunk in response.aiter_text():
+                buffer += chunk
+                while True:
+                    # Very basic JSON streaming parser for Vertex response format
+                    # Real implementation might need to handle [ {candidate...}, {candidate...} ] structure
+                    try:
+                        # Find the first complete JSON object in the buffer
+                        start = buffer.find('{')
+                        if start == -1: break
+                        
+                        # Find closing brace (this is naive but works for well-formed streaming JSON parts)
+                        depth = 0
+                        end = -1
+                        for i in range(start, len(buffer)):
+                            if buffer[i] == '{': depth += 1
+                            elif buffer[i] == '}': depth -= 1
+                            if depth == 0:
+                                end = i + 1
+                                break
+                        
+                        if end == -1: break # Incomplete object
+                        
+                        obj_str = buffer[start:end]
+                        buffer = buffer[end:].strip()
+                        if buffer.startswith(','): buffer = buffer[1:].strip()
+                        
+                        part_json = json.loads(obj_str)
+                        candidates = part_json.get("candidates", [])
+                        if candidates:
+                            delta = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                            if delta:
+                                yield delta
+                    except Exception:
+                        break
+
+async def call_gemini_stream_async(prompt: str) -> Generator[str, None, None]:
     async with semaphore:
         async with gemini_lock:
-            loop = asyncio.get_event_loop()
-            now = loop.time()
-            elapsed = now - last_call
-            if elapsed < RATE_LIMIT_SECONDS:
-                sleep_time = RATE_LIMIT_SECONDS - elapsed
-                logger.info(f"Rate limit: sleeping {sleep_time:.1f}s")
-                await asyncio.sleep(sleep_time)
-            last_call = loop.time()
-        return await _call_gemini_api_internal(prompt)
+            # We don't rate limit streaming as strictly since it's one long request
+            pass
+        async for chunk in _call_gemini_stream_internal(prompt):
+            yield chunk
 
 def call_gemini_sync(prompt: str) -> str:
     """Synchronous wrapper for agent_manager."""
@@ -230,6 +290,33 @@ def call_gemini_sync(prompt: str) -> str:
     except Exception as e:
         logger.error(f"Gemini call failed completely: {e}")
         raise
+
+def call_gemini_stream_sync(prompt: str):
+    """Bridge to run async generator in sync context for Flask."""
+    q = queue.Queue()
+    loop = asyncio.new_event_loop()
+
+    def run_async():
+        asyncio.set_event_loop(loop)
+        try:
+            async def wrap():
+                async for chunk in call_gemini_stream_async(prompt):
+                    q.put(chunk)
+                q.put(None) # End signal
+            loop.run_until_complete(wrap())
+        except Exception as e:
+            logger.error(f"Streaming thread error: {e}")
+            q.put(None)
+        finally:
+            loop.close()
+
+    import threading
+    threading.Thread(target=run_async).start()
+    
+    while True:
+        chunk = q.get()
+        if chunk is None: break
+        yield chunk
 
 class AgentManager:
     def __init__(
@@ -725,25 +812,32 @@ class AgentManager:
         # Step 2: Routing Tables -> Specific Details
         selection = self.get_routing_response(routing_tables)
         
-        # Step 3: Fetch Details
-        detail_context = self.get_detail_content(selection)
-        
-        # Step 4: Hybrid Search (Safety Net) - Run standard Semantic Search as well
-        # Only run if hierarchical found little data OR if query is very general
+        # Step 3 & 4: Fetch Details & Semantic Search in PARALLEL
+        # Using ThreadPoolExecutor specifically for I/O bound tasks (SQL + Qdrant)
+        logger.info("Starting Parallel Retrieval (L3 + Semantic)...")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            # Fetch details (L3)
+            future_details = executor.submit(self.get_detail_content, selection)
+            
+            # Determine if we should suppress the safety net
+            # Since we don't know hierarchical success yet, we run semantic search with lower k
+            future_semantic = executor.submit(self.search_qdrant, top_k=5)
+            
+            detail_context = future_details.result()
+            semantic_results = future_semantic.result()
+
+        # Step 4: Process Semantic Search (Safety Net)
         semantic_context = ""
-        semantic_results = []
-        
-        # Determine if we should suppress the safety net
-        # If we have successful hydration from routed tables, we reduce noise
+        # Determine if we should suppress the safety net response
         is_research_query = len(self.query.split()) > 4
         hierarchical_success = len(detail_context) > 2000
         
         if is_research_query and hierarchical_success:
             logger.info("Strong Hierarchical Context found: Suppressing Safety Net noise.")
-            safety_top_k = 0 # Skip semantic search to keep answer focused on the specific research documents
+            semantic_results = [] # Ignore semantic results to keep focus
         else:
-            safety_top_k = 2 if len(detail_context) > 5000 else 5
-            semantic_results = self.search_qdrant(top_k=safety_top_k)
+            # Keep top results only
+            semantic_results = semantic_results[:3]
 
         for point in semantic_results:
              payload = point.payload
@@ -754,8 +848,50 @@ class AgentManager:
 
         logger.info(f"Context sizes: Hierarchical={len(detail_context)} chars, Semantic={len(semantic_context)} chars")
 
-        # Final Synthesis (Passing routing_tables for transparency)
+        # Final Synthesis
         return self.get_final_response(
+            semantic_results, 
+            {
+                "Hierarchical Data": detail_context, 
+                "Semantic Data": semantic_context,
+                "Routing Tables": routing_tables
+            }
+        )
+
+    def pipeline_stream(self):
+        """Streaming version of the pipeline."""
+        logger.info("Starting Streaming Pipeline...")
+        
+        if self._check_fast_path():
+             yield from self.get_final_response_stream([], {"Is Fast Path": True})
+             return
+
+        routing_tables, master_metadata = self.get_master_routing()
+        
+        general_keywords = ["what data", "available data", "what do you have", "show me your data", "summary of the data"]
+        is_general = any(kw in self.query.lower() for kw in general_keywords)
+        
+        if is_general:
+            yield from self.get_final_response_stream([], {"Hierarchical Data": f"Summary of Available Data Sources:\n{master_metadata}", "Is General": True})
+            return
+
+        selection = self.get_routing_response(routing_tables)
+        
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_details = executor.submit(self.get_detail_content, selection)
+            future_semantic = executor.submit(self.search_qdrant, top_k=3)
+            detail_context = future_details.result()
+            semantic_results = future_semantic.result()
+
+        semantic_context = ""
+        for point in semantic_results:
+             payload = point.payload
+             text = payload.get('text', str(payload))
+             source_link = payload.get('source', 'Unknown')
+             source_name = self._get_display_name(source_link)
+             semantic_context += f"- Document: {source_name} (URI: {source_link})\n  Content: {text}\n\n"
+
+        yield from self.get_final_response_stream(
             semantic_results, 
             {
                 "Hierarchical Data": detail_context, 
@@ -844,4 +980,34 @@ class AgentManager:
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
             return "I encountered an error generating the final response."
+
+    def get_final_response_stream(self, search_results, context_dict):
+        """Streaming synthesis."""
+        # Setup prompt (similar to get_final_response but for streaming)
+        hierarchical_data = context_dict.get("Hierarchical Data", "")
+        semantic_data = context_dict.get("Semantic Data", "")
+        routing_tables = context_dict.get("Routing Tables", [])
+        is_fast_path = context_dict.get("Is Fast Path", False)
+
+        if is_fast_path:
+             prompt = f"The user said: '{self.query}'. Reply politely as the Adept Market Intelligence Assistant."
+             yield from call_gemini_stream_sync(prompt)
+             return
+
+        # Build thought trace and prompts...
+        system_prompt = (
+            "You are an expert Market Intelligence Analyst for Adept Technologies Ltd. "
+            "Synthesize the provided data with inline citations [Filename](URI). "
+            "List References at the end."
+        )
+        
+        history_text = ""
+        if self.chat_history:
+            recent_history = self.chat_history[-6:]
+            history_lines = [f"{m['role'].upper()}: {m['content']}" for m in recent_history]
+            history_text = "=== CONVERSATION HISTORY ===\n" + "\n".join(history_lines) + "\n\n"
+
+        user_prompt = f"{history_text}\nQuery: {self.query}\nContext:\n{hierarchical_data}\n{semantic_data}"
+        
+        yield from call_gemini_stream_sync(f"{system_prompt}\n\n{user_prompt}")
 

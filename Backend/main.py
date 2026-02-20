@@ -194,66 +194,60 @@ def run_query():
     logger.info("=== Incoming Query Request ===")
 
     try:
-        # Get data from JSON body
         data = request.json
-        if not data:
-            logger.error("No JSON data received")
-            return jsonify({"error": "No JSON body found"}), 400
+        if not data: return jsonify({"error": "No JSON body found"}), 400
 
         user_query = data.get("query")
         session_id = data.get("session_id")
+        stream = data.get("stream", True) # Default to streaming
 
-        if not user_query:
-            logger.error("No query found in payload")
-            return jsonify({"error": "Missing 'query' field"}), 400
+        if not user_query: return jsonify({"error": "Missing 'query' field"}), 400
 
-        logger.info(f"Query: {user_query}")
-        logger.info(f"Session: {session_id}, User: {getattr(g, 'user_id', 'Guest')}")
+        # --- 1. Check Cache ---
+        from cache_manager import get_cached_response, set_cached_response
+        cached = get_cached_response(user_query)
+        if cached:
+            logger.info("Cache HIT: Returning stored response.")
+            return jsonify({"Results": cached, "execution_time": 0.0, "cached": True})
 
-        # If session_id is provided and user is logged in, save user message
+        # --- 2. Build Context ---
         user_id = getattr(g, 'user_id', None)
         if session_id and user_id:
-            try:
-                add_chat_message(session_id, 'user', user_query)
-            except Exception as e:
-                logger.warning(f"Failed to save user message: {e}")
-        else:
-            logger.info("Guest user: Skipping chat history persistence.")
+            try: add_chat_message(session_id, 'user', user_query)
+            except: pass
 
-        # Fetch chat history for context
         chat_history = []
         if session_id:
-            try:
-                chat_history = get_chat_messages(session_id)
-            except Exception as e:
-                logger.warning(f"Failed to fetch chat history: {e}")
+            try: chat_history = get_chat_messages(session_id)
+            except: pass
 
-        # Initialize Agent and Pipeline
-        logger.info("Initializing AgentManager...")
         manager = AgentManager(query=user_query, chat_history=chat_history)
         
-        logger.info("Executing Pipeline...")
-        results = manager.pipeline()
+        # --- 3. Execute Pipeline (Stream or Sync) ---
+        if stream:
+            def generate():
+                full_response = ""
+                for chunk in manager.pipeline_stream():
+                    full_response += chunk
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                
+                # After stream ends, save and cache
+                duration = time.perf_counter() - start_time
+                if session_id and user_id:
+                    try: add_chat_message(session_id, 'assistant', full_response, round(duration, 2))
+                    except: pass
+                set_cached_response(user_query, full_response)
+                yield f"data: {json.dumps({'done': True, 'execution_time': round(duration, 2)})}\n\n"
 
-        logger.info("Synthesis complete. Formatting response...")
-        duration = time.perf_counter() - start_time
-        response_text = str(results)
-        
-        # If session_id is provided and user is logged in, save assistant message
-        if session_id and user_id:
-            try:
-                add_chat_message(session_id, 'assistant', response_text, round(duration, 2))
-            except Exception as e:
-                logger.warning(f"Failed to save assistant message: {e}")
-
-        logger.info(f"Query handled successfully in {duration:.2f}s")
-        
-        # Append sign-up encouragement for guests
-        final_response = response_text
-        if not user_id:
-            final_response += '<p style="font-size: 10px; color: gray; text-align: center; margin-top: 20px;"><em>Note: Your chat history is not being saved. <a href="/auth/login" style="color: inherit;">Sign up or Log in</a> to keep track of your research sessions.</em></p>'
-
-        return jsonify({"Results": final_response, "execution_time": round(duration, 2)})
+            return Response(generate(), mimetype='text/event-stream')
+        else:
+            results = manager.pipeline()
+            duration = time.perf_counter() - start_time
+            if session_id and user_id:
+                try: add_chat_message(session_id, 'assistant', results, round(duration, 2))
+                except: pass
+            set_cached_response(user_query, results)
+            return jsonify({"Results": results, "execution_time": round(duration, 2)})
 
     except Exception as e:
         logger.exception("FATAL ERROR in /query endpoint")
