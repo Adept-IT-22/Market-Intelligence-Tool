@@ -2,10 +2,15 @@ import sqlite3
 import os
 import time
 import logging
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import PointStruct
 
 logger = logging.getLogger(__name__)
 
 DB_PATH = os.getenv("DATABASE_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "DB/market-intelligence.db"))
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
+CACHE_COLLECTION = "semantic_cache_storage"
 
 # Cache TTL in seconds (24 hours)
 CACHE_TTL = 86400
@@ -18,8 +23,18 @@ ERROR_PHRASES = [
     "FATAL ERROR",
 ]
 
+# Global cache for the embedding model (to avoid reloading)
+_CACHED_EMBEDDER = None
+
+def get_embedder():
+    global _CACHED_EMBEDDER
+    if _CACHED_EMBEDDER is None:
+        from sentence_transformers import SentenceTransformer
+        _CACHED_EMBEDDER = SentenceTransformer("BAAI/bge-small-en")
+    return _CACHED_EMBEDDER
+
 def init_cache_table():
-    """Create the query cache table if it doesn't exist."""
+    """Create the query cache table and Qdrant collection if they don't exist."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -32,9 +47,17 @@ def init_cache_table():
     ''')
     conn.commit()
     conn.close()
+    
+    # Qdrant collection is assumed to be initialized via setup script or first-run logic
+    # But we ensure we can connect
+    try:
+        QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT).get_collections()
+    except Exception as e:
+        logger.error(f"Failed to connect to Qdrant for caching: {e}")
 
 def get_cached_response(query):
-    """Retrieve a cached response for a query (if not expired)."""
+    """Retrieve a cached response for a query (Exact match L1 -> Semantic match L2)."""
+    # 1. Exact Match (Fastest)
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -43,32 +66,46 @@ def get_cached_response(query):
         conn.close()
         if row:
             response, created_at = row
-            # Check TTL
-            if time.time() - created_at > CACHE_TTL:
-                logger.info("Cache EXPIRED: Clearing stale entry.")
+            if time.time() - created_at < CACHE_TTL:
+                logger.info("L1 Cache HIT: Exact match.")
+                return response
+            else:
                 clear_query_cache(query)
-                return None
-            return response
-        return None
-    except Exception:
-        return None
+    except Exception: pass
+
+    # 2. Semantic Match (Fuzzy)
+    try:
+        client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        embedder = get_embedder()
+        vector = embedder.encode(query).tolist()
+        
+        search_result = client.search(
+            collection_name=CACHE_COLLECTION,
+            query_vector=vector,
+            limit=1
+        )
+        
+        if search_result and search_result[0].score > 0.90:
+            logger.info(f"L2 Cache HIT: Semantic similarity {search_result[0].score:.2f}")
+            return search_result[0].payload.get("response")
+    except Exception as e:
+        logger.warning(f"Semantic cache search failed: {e}")
+
+    return None
 
 def set_cached_response(query, response):
-    """Store a response in the cache (only if it's a valid response)."""
+    """Store a response in both L1 (SQLite) and L2 (Qdrant) cache."""
     if not response or not isinstance(response, str):
         return
     
-    # Never cache error responses
     for phrase in ERROR_PHRASES:
         if phrase.lower() in response.lower():
-            logger.warning(f"Cache BLOCKED: Refusing to cache error response.")
             return
     
-    # Only cache responses with meaningful content (>100 chars)
     if len(response.strip()) < 100:
-        logger.info("Cache SKIP: Response too short to cache.")
         return
 
+    # 1. Store in SQLite (L1)
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -78,32 +115,68 @@ def set_cached_response(query, response):
         )
         conn.commit()
         conn.close()
-        logger.info(f"Cache SET: Stored response ({len(response)} chars).")
     except Exception as e:
-        logger.warning(f"Cache write failed: {e}")
+        logger.warning(f"SQLite cache write failed: {e}")
+
+    # 2. Store in Qdrant (L2)
+    try:
+        client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        embedder = get_embedder()
+        vector = embedder.encode(query).tolist()
+        
+        import uuid
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, query.lower().strip()))
+        
+        client.upsert(
+            collection_name=CACHE_COLLECTION,
+            points=[
+                PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload={
+                        "query": query.lower().strip(),
+                        "response": response,
+                        "created_at": time.time()
+                    }
+                )
+            ]
+        )
+        logger.info(f"Cache SET: L1 & L2 updated ({len(response)} chars).")
+    except Exception as e:
+        logger.warning(f"Qdrant cache upsert failed: {e}")
 
 def clear_query_cache(query):
-    """Clear a specific query from the cache."""
+    """Clear a specific query from both caches."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("DELETE FROM semantic_cache WHERE query = ?", (query.lower().strip(),))
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+        
+        client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        import uuid
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, query.lower().strip()))
+        client.delete(collection_name=CACHE_COLLECTION, points_selector=[point_id])
+    except Exception: pass
 
 def clear_cache():
-    """Clear ALL entries from the cache."""
+    """Clear ALL entries from both caches."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("DELETE FROM semantic_cache")
         conn.commit()
         conn.close()
-        logger.info("Cache CLEARED: All entries removed.")
+        
+        client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        client.delete_collection(CACHE_COLLECTION)
+        client.create_collection(
+            collection_name=CACHE_COLLECTION,
+            vectors_config={"size": 384, "distance": "Cosine"}
+        )
+        logger.info("Cache CLEARED: All L1 & L2 entries removed.")
     except Exception as e:
         logger.warning(f"Cache clear failed: {e}")
 
-# Initialize on import
 init_cache_table()
