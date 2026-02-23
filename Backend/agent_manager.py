@@ -224,6 +224,15 @@ async def call_gemini_async(prompt: str) -> str:
 
 async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None]:
     """Internal function to call Gemini API with streaming."""
+    global _last_call_time
+    with _gemini_lock:
+        import time as _time
+        now = _time.time()
+        elapsed = now - _last_call_time
+        if elapsed < RATE_LIMIT_SECONDS:
+            _time.sleep(RATE_LIMIT_SECONDS - elapsed)
+        _last_call_time = _time.time()
+
     token = get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",

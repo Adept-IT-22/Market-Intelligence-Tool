@@ -7,10 +7,13 @@ from qdrant_client.http.models import PointStruct
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.getenv("DATABASE_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "DB/market-intelligence.db"))
+# Consolidate paths
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.getenv("DATABASE_PATH", os.path.join(BASE_DIR, "DB/market-intelligence.db"))
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
 CACHE_COLLECTION = "semantic_cache_storage"
+DEBUG_LOG = os.path.join(BASE_DIR, "cache_debug.log")
 
 # Cache TTL in seconds (24 hours)
 CACHE_TTL = 86400
@@ -23,18 +26,19 @@ ERROR_PHRASES = [
     "FATAL ERROR",
 ]
 
-# Global cache for the embedding model (to avoid reloading)
-_CACHED_EMBEDDER = None
-
+# Re-use the embedding model from agent_manager to save memory/prevent hangs
 def get_embedder():
-    global _CACHED_EMBEDDER
-    if _CACHED_EMBEDDER is None:
+    try:
+        from agent_manager import get_embeddings_model
+        return get_embeddings_model()
+    except ImportError:
+        # Fallback if called in isolation
         from sentence_transformers import SentenceTransformer
-        _CACHED_EMBEDDER = SentenceTransformer("BAAI/bge-small-en")
-    return _CACHED_EMBEDDER
+        return SentenceTransformer("BAAI/bge-small-en")
 
 def init_cache_table():
     """Create the query cache table and Qdrant collection if they don't exist."""
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -57,21 +61,33 @@ def init_cache_table():
 
 def get_cached_response(query):
     """Retrieve a cached response for a query (Exact match L1 -> Semantic match L2)."""
+    q_norm = query.lower().strip()
+    with open(DEBUG_LOG, "a", encoding="utf-8") as f:
+        f.write(f"\n[{time.ctime()}] SEARCHING: '{q_norm}'\n")
+    
     # 1. Exact Match (Fastest)
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT response, created_at FROM semantic_cache WHERE query = ?", (query.lower().strip(),))
+        cursor.execute("SELECT response, created_at FROM semantic_cache WHERE query = ?", (q_norm,))
         row = cursor.fetchone()
         conn.close()
         if row:
             response, created_at = row
             if time.time() - created_at < CACHE_TTL:
                 logger.info("L1 Cache HIT: Exact match.")
+                with open(DEBUG_LOG, "a", encoding="utf-8") as f:
+                    f.write(f"[{time.ctime()}] L1 HIT!\n")
                 return response
             else:
                 clear_query_cache(query)
-    except Exception: pass
+        else:
+            with open(DEBUG_LOG, "a", encoding="utf-8") as f:
+                f.write(f"[{time.ctime()}] L1 MISS.\n")
+    except Exception as e:
+        with open(DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write(f"[{time.ctime()}] L1 ERROR: {e}\n")
+        pass
 
     # 2. Semantic Match (Fuzzy)
     try:
@@ -85,11 +101,23 @@ def get_cached_response(query):
             limit=1
         )
         
-        if search_result and search_result[0].score > 0.90:
-            logger.info(f"L2 Cache HIT: Semantic similarity {search_result[0].score:.2f}")
-            return search_result[0].payload.get("response")
+        if search_result:
+            score = search_result[0].score
+            with open(DEBUG_LOG, "a", encoding="utf-8") as f:
+                f.write(f"[{time.ctime()}] L2 Similarity Score: {score:.4f}\n")
+            
+            if score > 0.90:
+                logger.info(f"L2 Cache HIT: Semantic similarity {score:.2f}")
+                with open(DEBUG_LOG, "a", encoding="utf-8") as f:
+                    f.write(f"[{time.ctime()}] L2 HIT!\n")
+                return search_result[0].payload.get("response")
+        else:
+            with open(DEBUG_LOG, "a", encoding="utf-8") as f:
+                f.write(f"[{time.ctime()}] L2 MISS (No results).\n")
     except Exception as e:
         logger.warning(f"Semantic cache search failed: {e}")
+        with open(DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write(f"[{time.ctime()}] L2 ERROR: {e}\n")
 
     return None
 
@@ -105,13 +133,17 @@ def set_cached_response(query, response):
     if len(response.strip()) < 100:
         return
 
+    q_norm = query.lower().strip()
+    with open(DEBUG_LOG, "a", encoding="utf-8") as f:
+        f.write(f"[{time.ctime()}] STORING: '{q_norm}'\n")
+
     # 1. Store in SQLite (L1)
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute(
             "INSERT OR REPLACE INTO semantic_cache (query, response, created_at) VALUES (?, ?, ?)",
-            (query.lower().strip(), response, time.time())
+            (q_norm, response, time.time())
         )
         conn.commit()
         conn.close()

@@ -207,9 +207,18 @@ def run_query():
         # --- 1. Check Cache ---
         from cache_manager import get_cached_response, set_cached_response
         cached = get_cached_response(user_query)
-        if cached:
-            logger.info("Cache HIT: Returning stored response.")
+        
+        if cached and not stream:
+            logger.info("L1/L2 Cache HIT: Returning immediate response.")
             return jsonify({"Results": cached, "execution_time": 0.0, "cached": True})
+        
+        # If cached and stream requested, we treat it as a streamable "fast hit"
+        if cached and stream:
+            logger.info("L1/L2 Cache HIT: Returning as stream.")
+            def generate_cached():
+                yield f"data: {json.dumps({'chunk': cached})}\n\n"
+                yield f"data: {json.dumps({'done': True, 'execution_time': 0.0, 'cached': True})}\n\n"
+            return Response(generate_cached(), mimetype='text/event-stream')
 
         # --- 2. Build Context ---
         user_id = getattr(g, 'user_id', None)
