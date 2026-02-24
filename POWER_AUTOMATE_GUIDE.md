@@ -7,7 +7,7 @@ This guide explains how to automatically ingest files from SharePoint into the M
 ## Prerequisites
 
 ### Option A: Use Your Staging Server (Recommended for Production)
-If your server at `192.168.1.250` has a **public IP** or is behind a properly configured firewall/NAT with port forwarding, use:
+If your server at `<STAGING_IP>` has a **public IP** or is behind a properly configured firewall/NAT with port forwarding, use:
 - **URL**: `http://<YOUR_PUBLIC_IP>:8000/upload`
 
 ### Option B: Use ngrok for Testing

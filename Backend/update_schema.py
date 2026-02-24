@@ -29,9 +29,17 @@ def migrate_db():
                 Datatype TEXT,
                 Sectors TEXT,
                 table_name TEXT, 
-                month_created TEXT
+                month_created TEXT,
+                Department TEXT DEFAULT 'General'
             )
         """)
+
+        # Migration: Add Department to Master if missing
+        try:
+            cursor.execute("ALTER TABLE Master ADD COLUMN Department TEXT DEFAULT 'General'")
+            logger.info("Migration: Added 'Department' column to 'Master' table.")
+        except sqlite3.OperationalError:
+            logger.info("Migration: 'Department' column already exists in 'Master'.")
         
         # 3. Migration Logic
         logger.info("Migrating existing entries from Master_Old to Master...")

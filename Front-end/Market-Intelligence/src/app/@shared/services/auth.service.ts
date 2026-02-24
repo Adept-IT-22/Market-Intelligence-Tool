@@ -1,5 +1,6 @@
-import { Injectable, signal } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { Injectable, signal, PLATFORM_ID, Inject } from '@angular/core';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { isPlatformBrowser } from '@angular/common';
 import { environment } from '../../../environments/environment';
 import { tap, catchError, of, map } from 'rxjs';
 
@@ -24,8 +25,13 @@ export class AuthService {
   currentUser = signal<User | null>(null);
   isAuthenticated = signal<boolean>(false);
 
-  constructor(private http: HttpClient) {
-    this.loadUserFromStorage();
+  constructor(
+    private http: HttpClient,
+    @Inject(PLATFORM_ID) private platformId: Object
+  ) {
+    if (isPlatformBrowser(this.platformId)) {
+      this.loadUserFromStorage();
+    }
   }
 
   private loadUserFromStorage() {
@@ -54,23 +60,23 @@ export class AuthService {
   }
 
   changePassword(currentPassword: string, newPassword: string) {
+    const headers = this.getAuthHeaders();
     return this.http.post<{ message: string }>(`${environment.apiUrl}/auth/change-password`, {
       currentPassword, newPassword
-    }, {
-      headers: { 'Authorization': `Bearer ${this.getToken()}` }
-    });
+    }, { headers });
   }
 
   logout() {
-    localStorage.removeItem(this.TOKEN_KEY);
+    if (isPlatformBrowser(this.platformId)) {
+      localStorage.removeItem(this.TOKEN_KEY);
+    }
     this.currentUser.set(null);
     this.isAuthenticated.set(false);
   }
 
   getMe() {
-    return this.http.get<{ user: User }>(`${environment.apiUrl}/auth/me`, {
-      headers: { 'Authorization': `Bearer ${this.getToken()}` }
-    }).pipe(
+    const headers = this.getAuthHeaders();
+    return this.http.get<{ user: User }>(`${environment.apiUrl}/auth/me`, { headers }).pipe(
       tap(res => {
         this.currentUser.set(res.user);
         this.isAuthenticated.set(true);
@@ -83,11 +89,25 @@ export class AuthService {
   }
 
   getToken(): string | null {
-    return localStorage.getItem(this.TOKEN_KEY);
+    if (isPlatformBrowser(this.platformId)) {
+      return localStorage.getItem(this.TOKEN_KEY);
+    }
+    return null;
+  }
+
+  getAuthHeaders(): HttpHeaders {
+    let headers = new HttpHeaders();
+    const token = this.getToken();
+    if (token) {
+      headers = headers.set('Authorization', `Bearer ${token}`);
+    }
+    return headers;
   }
 
   private handleAuthSuccess(res: AuthResponse) {
-    localStorage.setItem(this.TOKEN_KEY, res.token);
+    if (isPlatformBrowser(this.platformId)) {
+      localStorage.setItem(this.TOKEN_KEY, res.token);
+    }
     this.currentUser.set(res.user);
     this.isAuthenticated.set(true);
   }

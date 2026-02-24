@@ -14,6 +14,7 @@ from models import (
     add_chat_message, get_chat_messages, update_user_password
 )
 from auth import hash_password, verify_password, create_token, jwt_required, jwt_optional
+from cache_manager import get_cached_response, set_cached_response
 
 #Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -196,35 +197,58 @@ def run_query():
 
     try:
         data = request.json
-        if not data: return jsonify({"error": "No JSON body found"}), 400
+        if not data:
+            return jsonify({"error": "No JSON body found"}), 400
 
         user_query = data.get("query")
         session_id = data.get("session_id")
-        stream = data.get("stream", False) # Default to non-streaming until frontend supports SSE
+        stream = data.get("stream", False)
 
-        if not user_query: return jsonify({"error": "Missing 'query' field"}), 400
+        if not user_query:
+            return jsonify({"error": "Missing 'query' field"}), 400
 
-        # --- 1. Check Cache ---
-        from cache_manager import get_cached_response, set_cached_response
+        # --- 1. Identity & Context ---
+        user_id = getattr(g, 'user_id', None)
+        logger.info(f"Query: {user_query} | Session: {session_id} | User: {user_id or 'Guest'}")
+
+        # --- 2. Check Cache ---
         cached = get_cached_response(user_query)
         if cached:
             logger.info("Cache HIT: Returning stored response.")
-            return jsonify({"Results": cached, "execution_time": 0.0, "cached": True})
+            # Persist history on cache hit
+            if session_id and user_id:
+                try:
+                    add_chat_message(session_id, 'user', user_query)
+                    add_chat_message(session_id, 'assistant', cached, 0.0)
+                except Exception as e:
+                    logger.warning(f"Failed to save history for cache hit: {e}")
 
-        # --- 2. Build Context ---
-        user_id = getattr(g, 'user_id', None)
+            if not stream:
+                return jsonify({"Results": cached, "execution_time": 0.0, "cached": True})
+            else:
+                def generate_cached():
+                    yield f"data: {json.dumps({'chunk': cached})}\n\n"
+                    yield f"data: {json.dumps({'done': True, 'execution_time': 0.0, 'cached': True})}\n\n"
+                return Response(generate_cached(), mimetype='text/event-stream')
+
+        # --- 3. Save User Message (Start of Live Pipeline) ---
         if session_id and user_id:
-            try: add_chat_message(session_id, 'user', user_query)
-            except: pass
+            try:
+                add_chat_message(session_id, 'user', user_query)
+            except Exception as e:
+                logger.warning(f"Failed to save user message: {e}")
 
+        # --- 4. Fetch History for Context ---
         chat_history = []
         if session_id:
-            try: chat_history = get_chat_messages(session_id)
-            except: pass
+            try:
+                chat_history = get_chat_messages(session_id)
+            except Exception as e:
+                logger.warning(f"Failed to fetch chat history: {e}")
 
         manager = AgentManager(query=user_query, chat_history=chat_history)
         
-        # --- 3. Execute Pipeline (Stream or Sync) ---
+        # --- 5. Execute Pipeline ---
         if stream:
             def generate():
                 full_response = ""
@@ -232,11 +256,13 @@ def run_query():
                     full_response += chunk
                     yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                 
-                # After stream ends, save and cache
                 duration = time.perf_counter() - start_time
                 if session_id and user_id:
-                    try: add_chat_message(session_id, 'assistant', full_response, round(duration, 2))
-                    except: pass
+                    try:
+                        add_chat_message(session_id, 'assistant', full_response, round(duration, 2))
+                    except Exception as e:
+                        logger.warning(f"Failed to save assistant history: {e}")
+                
                 set_cached_response(user_query, full_response)
                 yield f"data: {json.dumps({'done': True, 'execution_time': round(duration, 2)})}\n\n"
 
@@ -245,9 +271,12 @@ def run_query():
             results = manager.pipeline()
             duration = time.perf_counter() - start_time
             if session_id and user_id:
-                try: add_chat_message(session_id, 'assistant', results, round(duration, 2))
-                except: pass
-            set_cached_response(user_query, results)
+                try:
+                    add_chat_message(session_id, 'assistant', results, round(duration, 2))
+                except Exception as e:
+                    logger.warning(f"Failed to save assistant message: {e}")
+            
+            set_cached_response(user_query, str(results))
             return jsonify({"Results": results, "execution_time": round(duration, 2)})
 
     except Exception as e:

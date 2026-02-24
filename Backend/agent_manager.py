@@ -27,11 +27,10 @@ logger.setLevel(logging.INFO)
 # DO NOT hardcode Project IDs here. Ensure these are set in your .env file on Staging.
 PROJECT_ID = os.getenv("GCP_PROJECT_ID")
 REGION = os.getenv("GCP_REGION", "us-central1")
-GEMINI_MODEL_NAME = "gemini-2.0-flash"
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
 
 if not PROJECT_ID:
     logger.error("!!! CRITICAL: GCP_PROJECT_ID is not set in environment. Gemini calls WILL fail with DNS errors. !!!")
-    # Using a dummy but valid-looking string to avoid NameError, but the call will fail cleanly with 404/403
     PROJECT_ID = "missing-project-id"
 
 VERTEX_ENDPOINT = (
@@ -39,6 +38,79 @@ VERTEX_ENDPOINT = (
     f"projects/{PROJECT_ID}/locations/{REGION}/"
     f"publishers/google/models/{GEMINI_MODEL_NAME}:generateContent"
 )
+
+def _build_system_prompt(chat_history=None) -> str:
+    """Consolidated system prompt logic for consistency."""
+    prompt = (
+        "You are 'Adept Intelligence', a premium Market Research Assistant specializing in Kenyan economic sectors and Adept Technologies innovations.\n"
+        "Instructions:\n"
+        "1. Prioritize provided context. If the answer is not in the context, say so.\n"
+        "2. Keep responses professional, data-driven, and highly structured.\n"
+        "3. Interpret terms like 'abroad' or 'overseas' as outside Kenya.\n"
+    )
+    if chat_history:
+        prompt += f"\nRecent History Context:\n{chat_history}"
+    return prompt
+
+async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None]:
+    """Robust streaming parser for Vertex AI's JSON array format."""
+    # Note: Rate limiting is handled by the caller or global lock
+    
+    stream_endpoint = VERTEX_ENDPOINT.replace(":generateContent", ":streamGenerateContent")
+    headers = {"Authorization": f"Bearer {get_access_token()}", "Content-Type": "application/json"}
+    data = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.0,
+            "maxOutputTokens": 8192,
+        }
+    }
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        async with client.stream("POST", stream_endpoint, headers=headers, json=data) as response:
+            if response.status_code != 200:
+                err_text = await response.aread()
+                logger.error(f"Gemini Streaming Error {response.status_code}: {err_text}")
+                yield "Error connecting to Gemini stream."
+                return
+
+            buffer = ""
+            async for chunk in response.aiter_text():
+                buffer += chunk
+                while True:
+                    start = buffer.find('{')
+                    if start == -1:
+                        # Clear buffer of non-JSON rubble (like leading [ or ,)
+                        if '}' in buffer: buffer = buffer[buffer.rfind('}')+1:]
+                        break
+                    
+                    depth = 0
+                    end = -1
+                    in_str = False
+                    esc = False
+                    for i in range(start, len(buffer)):
+                        c = buffer[i]
+                        if c == '"' and not esc: in_str = not in_str
+                        elif c == '\\' and in_str: esc = not esc; continue
+                        elif not in_str:
+                            if c == '{': depth += 1
+                            elif c == '}': depth -= 1
+                            if depth == 0:
+                                end = i + 1
+                                break
+                        esc = False
+                    
+                    if end != -1:
+                        obj_str = buffer[start:end]
+                        buffer = buffer[end:]
+                        try:
+                            obj = json.loads(obj_str)
+                            candidates = obj.get('candidates', [])
+                            if candidates:
+                                text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+                                if text: yield text
+                        except Exception: pass
+                    else: break
 
 logger.info(f"Gemini initialized for Project: {PROJECT_ID} in Region: {REGION}")
 

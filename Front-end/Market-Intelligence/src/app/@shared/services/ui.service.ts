@@ -1,4 +1,5 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, signal, PLATFORM_ID, Inject } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 
 @Injectable({
     providedIn: 'root'
@@ -6,11 +7,16 @@ import { Injectable, signal } from '@angular/core';
 export class UiService {
     private readonly SIDEBAR_STATE_KEY = 'mit_sidebar_expanded';
 
-    isSidebarExpanded = signal<boolean>(this.getInitialSidebarState());
+    isSidebarExpanded = signal<boolean>(true);
 
-    constructor() { }
+    constructor(@Inject(PLATFORM_ID) private platformId: Object) {
+        if (isPlatformBrowser(this.platformId)) {
+            this.isSidebarExpanded.set(this.getInitialSidebarState());
+        }
+    }
 
     private getInitialSidebarState(): boolean {
+        if (!isPlatformBrowser(this.platformId)) return true;
         const saved = localStorage.getItem(this.SIDEBAR_STATE_KEY);
         return saved !== null ? saved === 'true' : true;
     }
@@ -18,6 +24,8 @@ export class UiService {
     toggleSidebar() {
         const newState = !this.isSidebarExpanded();
         this.isSidebarExpanded.set(newState);
-        localStorage.setItem(this.SIDEBAR_STATE_KEY, newState.toString());
+        if (isPlatformBrowser(this.platformId)) {
+            localStorage.setItem(this.SIDEBAR_STATE_KEY, newState.toString());
+        }
     }
 }

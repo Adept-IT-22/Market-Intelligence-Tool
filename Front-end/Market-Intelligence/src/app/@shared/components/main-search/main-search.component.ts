@@ -23,6 +23,7 @@ interface ChatThread {
   loadingStep?: string;
   isTyping?: boolean;
   executionTime?: number;
+  isCached?: boolean;
   attachedFiles?: UploadedFile[];
 }
 
@@ -212,6 +213,7 @@ export class MainSearchComponent implements AfterViewChecked {
   private readonly CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
   private getQueryCache(): Record<string, { response: string; execution_time: number; timestamp: number }> {
+    if (!isPlatformBrowser(this.platformId)) return {};
     try {
       const raw = localStorage.getItem(this.QUERY_CACHE_KEY);
       return raw ? JSON.parse(raw) : {};
@@ -238,6 +240,7 @@ export class MainSearchComponent implements AfterViewChecked {
       sorted.slice(0, keys.length - 50).forEach(k => delete cache[k]);
     }
 
+    if (!isPlatformBrowser(this.platformId)) return;
     try { localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache)); } catch { }
   }
 
@@ -249,7 +252,9 @@ export class MainSearchComponent implements AfterViewChecked {
     // Check TTL
     if (Date.now() - entry.timestamp > this.CACHE_TTL_MS) {
       delete cache[query.toLowerCase().trim()];
-      try { localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache)); } catch { }
+      if (isPlatformBrowser(this.platformId)) {
+        try { localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache)); } catch { }
+      }
       return null;
     }
 
@@ -265,6 +270,7 @@ export class MainSearchComponent implements AfterViewChecked {
       thread.isLoading = false;
       thread.isTyping = true;
       thread.executionTime = 0;
+      thread.isCached = true;
 
       thread.aiMessage = {
         content: '',
@@ -299,7 +305,7 @@ export class MainSearchComponent implements AfterViewChecked {
     };
 
     this.http.post(`${environment.apiUrl}/query`, payload, {
-      headers: { 'Authorization': `Bearer ${this.auth.getToken()}` }
+      headers: this.auth.getAuthHeaders()
     })
       .pipe(
         timeout(120000),
@@ -315,6 +321,7 @@ export class MainSearchComponent implements AfterViewChecked {
           thread.isLoading = false;
           thread.isTyping = true;
           thread.executionTime = res.execution_time;
+          thread.isCached = res.cached;
 
           thread.aiMessage = {
             content: '',
