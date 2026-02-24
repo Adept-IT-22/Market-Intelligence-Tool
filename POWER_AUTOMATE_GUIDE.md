@@ -58,9 +58,9 @@ Use this URL in Power Automate: `https://abc123.ngrok-free.app/upload`
    - **Body**: Paste the following JSON:
      ```json
      {
-       "$content": "File Content" (Dynamic content from Step 3),
-       "fileName": "Name" (Dynamic content from Step 1),
-       "source": "Marketing" (Change this for each flow: B.Dev, Products, BDC, or BA)
+       "$content": "DYNAMIC_CONTENT_FROM_SHAREPOINT",
+       "fileName": "DYNAMIC_FILE_NAME",
+       "source": "Marketing"
      }
      ```
 
@@ -76,8 +76,8 @@ Use this URL in Power Automate: `https://abc123.ngrok-free.app/upload`
 |----------|-------|
 | **URL** | `http://<SERVER>:8000/upload` |
 | **Method** | `POST` |
-| **Content-Type** | `multipart/form-data` |
-| **Form Field** | `file` |
+| **Content-Type** | `application/json` (Preferred) or `multipart/form-data` |
+| **Form Field** | `file` (if using multipart) |
 
 ### Supported File Types
 - Documents: `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.xls`, `.md`
