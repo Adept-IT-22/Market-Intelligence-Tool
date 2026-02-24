@@ -6,6 +6,7 @@ import os
 from dotenv import load_dotenv
 import logging
 from agent_manager import AgentManager
+from cache_manager import get_cached_response, set_cached_response
 from typing import Dict
 from models import (
     init_chat_tables, create_user, get_user_by_email, get_user_by_id,
@@ -205,31 +206,48 @@ def run_query():
         if not user_query: return jsonify({"error": "Missing 'query' field"}), 400
 
         # --- 1. Check Cache ---
-        from cache_manager import get_cached_response, set_cached_response
         cached = get_cached_response(user_query)
+        
+        # Fix 7: Resolve session context BEFORE returning cached responses
+        user_id = getattr(g, 'user_id', None)
         
         if cached and not stream:
             logger.info("L1/L2 Cache HIT: Returning immediate response.")
+            # Persist messages even for cache hits so session history is complete
+            if session_id and user_id:
+                try:
+                    add_chat_message(session_id, 'user', user_query)
+                    add_chat_message(session_id, 'assistant', cached, 0.0)
+                except Exception as e:
+                    logger.warning(f"Failed to persist cache-hit messages: {e}")
             return jsonify({"Results": cached, "execution_time": 0.0, "cached": True})
         
-        # If cached and stream requested, we treat it as a streamable "fast hit"
+        # If cached and stream requested, serve as fast SSE hit
         if cached and stream:
             logger.info("L1/L2 Cache HIT: Returning as stream.")
+            if session_id and user_id:
+                try:
+                    add_chat_message(session_id, 'user', user_query)
+                    add_chat_message(session_id, 'assistant', cached, 0.0)
+                except Exception as e:
+                    logger.warning(f"Failed to persist cache-hit messages: {e}")
             def generate_cached():
                 yield f"data: {json.dumps({'chunk': cached})}\n\n"
                 yield f"data: {json.dumps({'done': True, 'execution_time': 0.0, 'cached': True})}\n\n"
             return Response(generate_cached(), mimetype='text/event-stream')
 
         # --- 2. Build Context ---
-        user_id = getattr(g, 'user_id', None)
         if session_id and user_id:
-            try: add_chat_message(session_id, 'user', user_query)
-            except: pass
+            try:
+                add_chat_message(session_id, 'user', user_query)
+            except Exception as e:
+                logger.warning(f"Failed to save user message for session {session_id}: {e}")
 
         chat_history = []
         if session_id:
             try: chat_history = get_chat_messages(session_id)
-            except: pass
+            except Exception as e:
+                logger.warning(f"Failed to fetch chat history for session {session_id}: {e}")
 
         manager = AgentManager(query=user_query, chat_history=chat_history)
         
@@ -245,7 +263,8 @@ def run_query():
                 duration = time.perf_counter() - start_time
                 if session_id and user_id:
                     try: add_chat_message(session_id, 'assistant', full_response, round(duration, 2))
-                    except: pass
+                    except Exception as e:
+                        logger.warning(f"Failed to save assistant message to history: {e}")
                 set_cached_response(user_query, full_response)
                 yield f"data: {json.dumps({'done': True, 'execution_time': round(duration, 2)})}\n\n"
 
@@ -255,7 +274,8 @@ def run_query():
             duration = time.perf_counter() - start_time
             if session_id and user_id:
                 try: add_chat_message(session_id, 'assistant', results, round(duration, 2))
-                except: pass
+                except Exception as e:
+                    logger.warning(f"Failed to save assistant message to history: {e}")
             set_cached_response(user_query, results)
             return jsonify({"Results": results, "execution_time": round(duration, 2)})
 

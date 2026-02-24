@@ -24,6 +24,7 @@ interface ChatThread {
   isTyping?: boolean;
   executionTime?: number;
   attachedFiles?: UploadedFile[];
+  isCachedResult?: boolean;
 }
 
 interface UploadedFile {
@@ -212,6 +213,7 @@ export class MainSearchComponent implements AfterViewChecked {
   private readonly CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
   private getQueryCache(): Record<string, { response: string; execution_time: number; timestamp: number }> {
+    if (!isPlatformBrowser(this.platformId)) return {};
     try {
       const raw = localStorage.getItem(this.QUERY_CACHE_KEY);
       return raw ? JSON.parse(raw) : {};
@@ -225,7 +227,8 @@ export class MainSearchComponent implements AfterViewChecked {
     if (response.length < 100) return;
 
     const cache = this.getQueryCache();
-    cache[query.toLowerCase().trim()] = {
+    const normalizedKey = query.toLowerCase().trim().replace(/[?.,!]$/, "");
+    cache[normalizedKey] = {
       response,
       execution_time: executionTime,
       timestamp: Date.now()
@@ -238,18 +241,27 @@ export class MainSearchComponent implements AfterViewChecked {
       sorted.slice(0, keys.length - 50).forEach(k => delete cache[k]);
     }
 
-    try { localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache)); } catch { }
+    try {
+      if (isPlatformBrowser(this.platformId)) {
+        localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache));
+      }
+    } catch { }
   }
 
   private getCachedQuery(query: string): { response: string; execution_time: number } | null {
     const cache = this.getQueryCache();
-    const entry = cache[query.toLowerCase().trim()];
+    const normalizedKey = query.toLowerCase().trim().replace(/[?.,!]$/, "");
+    const entry = cache[normalizedKey];
     if (!entry) return null;
 
     // Check TTL
     if (Date.now() - entry.timestamp > this.CACHE_TTL_MS) {
-      delete cache[query.toLowerCase().trim()];
-      try { localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache)); } catch { }
+      delete cache[normalizedKey];
+      try {
+        if (isPlatformBrowser(this.platformId)) {
+          localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache));
+        }
+      } catch { }
       return null;
     }
 
@@ -264,20 +276,22 @@ export class MainSearchComponent implements AfterViewChecked {
     if (cached) {
       thread.isLoading = false;
       thread.isTyping = true;
-      thread.executionTime = 0;
-
+      thread.executionTime = cached.execution_time;
+      thread.isCachedResult = true;
       thread.aiMessage = {
         content: '',
         timestamp: new Date()
       };
 
-      this.typewriteResponse(thread, cached.response);
+      const transformed = this.transformReferences(cached.response);
+      this.typewriteResponse(thread, transformed);
+      this.scrollToBottom();
 
       // Save to guest history
       if (sessionId && sessionId < 0) {
         this.chatService.saveGuestMessage(sessionId, { role: 'user', content: query });
         this.chatService.saveGuestMessage(sessionId, {
-          role: 'assistant', content: cached.response, execution_time: 0
+          role: 'assistant', content: cached.response, execution_time: cached.execution_time
         });
       }
 

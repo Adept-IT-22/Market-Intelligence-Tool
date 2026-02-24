@@ -5,7 +5,7 @@ import os
 import sys
 
 # Configuration
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://127.0.0.1:8000"
 QUERY_ENDPOINT = f"{BASE_URL}/query"
 
 def run_query(query, stream=False):
@@ -26,7 +26,7 @@ def run_query(query, stream=False):
         return {"error": str(e)}, time.time() - start_time
 
 def test_performance_benchmarks():
-    print("\n🚀 Starting Performance & Cache Verification Suite\n" + "="*50)
+    print("\n🚀 Starting Adept Performance & Cache Verification Suite\n" + "="*50)
     
     # Test 1: Cold Run (Cache Miss)
     print("\n[TEST 1] Cold Run (Full RAG Pipeline)")
