@@ -481,7 +481,8 @@
     color: var(--text-muted);
 }
 
-.time-taken {
+.time-taken,
+.cached-badge {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -491,6 +492,14 @@
         width: 16px;
         height: 16px;
     }
+}
+
+.cached-badge {
+    color: var(--accent-secondary);
+    background: rgba(16, 185, 129, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
 }
 
 .action-btn {

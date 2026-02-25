@@ -25,6 +25,7 @@ interface ChatThread {
   executionTime?: number;
   isCached?: boolean;
   attachedFiles?: UploadedFile[];
+  isCachedResult?: boolean;
 }
 
 interface UploadedFile {
@@ -227,7 +228,8 @@ export class MainSearchComponent implements AfterViewChecked {
     if (response.length < 100) return;
 
     const cache = this.getQueryCache();
-    cache[query.toLowerCase().trim()] = {
+    const normalizedKey = query.toLowerCase().trim().replace(/[?.,!]$/, "");
+    cache[normalizedKey] = {
       response,
       execution_time: executionTime,
       timestamp: Date.now()
@@ -240,21 +242,27 @@ export class MainSearchComponent implements AfterViewChecked {
       sorted.slice(0, keys.length - 50).forEach(k => delete cache[k]);
     }
 
-    if (!isPlatformBrowser(this.platformId)) return;
-    try { localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache)); } catch { }
+    try {
+      if (isPlatformBrowser(this.platformId)) {
+        localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache));
+      }
+    } catch { }
   }
 
   private getCachedQuery(query: string): { response: string; execution_time: number } | null {
     const cache = this.getQueryCache();
-    const entry = cache[query.toLowerCase().trim()];
+    const normalizedKey = query.toLowerCase().trim().replace(/[?.,!]$/, "");
+    const entry = cache[normalizedKey];
     if (!entry) return null;
 
     // Check TTL
     if (Date.now() - entry.timestamp > this.CACHE_TTL_MS) {
-      delete cache[query.toLowerCase().trim()];
-      if (isPlatformBrowser(this.platformId)) {
-        try { localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache)); } catch { }
-      }
+      delete cache[normalizedKey];
+      try {
+        if (isPlatformBrowser(this.platformId)) {
+          localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache));
+        }
+      } catch { }
       return null;
     }
 
@@ -269,19 +277,23 @@ export class MainSearchComponent implements AfterViewChecked {
     if (cached) {
       thread.isLoading = false;
       thread.isTyping = true;
-      thread.executionTime = 0;
-      thread.isCached = true;
-
+      thread.executionTime = cached.execution_time;
+      thread.isCachedResult = true;
       thread.aiMessage = {
         content: '',
         timestamp: new Date()
       };
 
-      // For authenticated users, notify server to persist history
-      if (sessionId && sessionId > 0) {
-        this.http.post(`${environment.apiUrl}/query`, { query, session_id: sessionId }, {
-          headers: this.auth.getAuthHeaders()
-        }).subscribe(); // Server will cache-hit and persist
+      const transformed = this.transformReferences(cached.response);
+      this.typewriteResponse(thread, transformed);
+      this.scrollToBottom();
+
+      // Save to guest history
+      if (sessionId && sessionId < 0) {
+        this.chatService.saveGuestMessage(sessionId, { role: 'user', content: query });
+        this.chatService.saveGuestMessage(sessionId, {
+          role: 'assistant', content: cached.response, execution_time: cached.execution_time
+        });
       }
 
       // Auto-rename
@@ -295,76 +307,103 @@ export class MainSearchComponent implements AfterViewChecked {
       return; // Skip server call
     }
 
-    // --- No cache hit, call server ---
+    // --- No cache hit, call server with Streaming enabled ---
     const payload = {
       query,
-      session_id: sessionId
+      session_id: sessionId,
+      stream: true // Enable streaming
     };
 
-    this.http.post(`${environment.apiUrl}/query`, payload, {
-      headers: this.auth.getAuthHeaders()
+    thread.aiMessage = {
+      content: '',
+      timestamp: new Date()
+    };
+
+    fetch(`${environment.apiUrl}/query`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.auth.getToken()}`
+      },
+      body: JSON.stringify(payload)
     })
-      .pipe(
-        timeout(120000),
-        catchError((err) => {
-          if (err.name === 'TimeoutError') {
-            return throwError(() => ({ error: { error: 'Request timed out. The system is taking longer than expected. Please try again.' } }));
-          }
-          return throwError(() => err);
-        })
-      )
-      .subscribe({
-        next: (res: any) => {
-          thread.isLoading = false;
-          thread.isTyping = true;
-          thread.executionTime = res.execution_time;
-          thread.isCached = res.cached;
+      .then(async response => {
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'Server error');
+        }
 
-          thread.aiMessage = {
-            content: '',
-            timestamp: new Date()
-          };
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('ReadableStream not supported');
 
-          this.typewriteResponse(thread, res.Results);
+        thread.isLoading = false;
+        thread.isTyping = true;
+        let fullResponse = '';
+        let buffer = '';
 
-          // Cache the response locally
-          this.setQueryCache(query, res.Results, res.execution_time);
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-          // For guests, save messages to localStorage
-          if (sessionId && sessionId < 0) {
-            this.chatService.saveGuestMessage(sessionId, {
-              role: 'user',
-              content: query
-            });
-            this.chatService.saveGuestMessage(sessionId, {
-              role: 'assistant',
-              content: res.Results,
-              execution_time: res.execution_time
-            });
-          }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep partial line in buffer
 
-          // Auto-rename chat if it's the first message and title is "New Chat"
-          if (sessionId && this.threads.length === 1) {
-            const currentSessions = this.chatService.sessions();
-            const session = currentSessions.find(s => s.id === sessionId);
-            if (session && session.title === 'New Chat') {
-              const newTitle = query.length > 30 ? query.substring(0, 30) + '...' : query;
-              this.chatService.renameChat(sessionId, newTitle).subscribe();
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(trimmedLine.substring(6));
+                if (data.chunk) {
+                  fullResponse += data.chunk;
+                  // Update UI in real-time
+                  if (thread.aiMessage) {
+                    thread.aiMessage.content = this.transformReferences(fullResponse);
+                  }
+                  this.scrollToBottom();
+                } else if (data.done) {
+                  thread.executionTime = data.execution_time;
+                  thread.isTyping = false;
+                  // Final cache update
+                  this.setQueryCache(query, fullResponse, data.execution_time);
+                }
+              } catch (e) {
+                console.warn('Error parsing SSE chunk', e);
+              }
             }
           }
-        },
-        error: (err) => {
-          console.error('Error fetching data', err);
-          thread.isLoading = false;
-          const errorMsg = err?.error?.error || err?.message || 'Could not reach the intelligence engine. Please try again later.';
-          thread.aiMessage = {
-            content: `⚠️ Error: ${errorMsg}`,
-            timestamp: new Date()
-          };
         }
+
+        // For guests, save messages to localStorage after stream ends
+        if (sessionId && sessionId < 0) {
+          this.chatService.saveGuestMessage(sessionId, { role: 'user', content: query });
+          this.chatService.saveGuestMessage(sessionId, {
+            role: 'assistant', content: fullResponse, execution_time: thread.executionTime
+          });
+        }
+
+        // Auto-rename chat if it's the first message
+        if (sessionId && this.threads.length === 1) {
+          const session = this.chatService.sessions().find(s => s.id === sessionId);
+          if (session && session.title === 'New Chat') {
+            const newTitle = query.length > 30 ? query.substring(0, 30) + '...' : query;
+            this.chatService.renameChat(sessionId, newTitle).subscribe();
+          }
+        }
+      })
+      .catch(err => {
+        console.error('Streaming error', err);
+        thread.isLoading = false;
+        thread.isTyping = false;
+        const errorMsg = err?.message || 'Could not reach the intelligence engine.';
+        thread.aiMessage = {
+          content: `⚠️ Error: ${errorMsg}`,
+          timestamp: new Date()
+        };
       });
 
-    // Update cache because threads array reference might change or items might be added
+    // Update cache because threads array reference might change
     if (sessionId) {
       this.threadCache.set(sessionId, this.threads);
     }
