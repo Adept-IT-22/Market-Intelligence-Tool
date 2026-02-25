@@ -5,7 +5,7 @@ import time
 import os
 from dotenv import load_dotenv
 import logging
-from agent_manager import AgentManager
+from agent_manager import AgentManager, get_embeddings_model
 from typing import Dict
 from models import (
     init_chat_tables, create_user, get_user_by_email, get_user_by_id,
@@ -212,7 +212,7 @@ def run_query():
         logger.info(f"Query: {user_query} | Session: {session_id} | User: {user_id or 'Guest'}")
 
         # --- 2. Check Cache ---
-        cached = get_cached_response(user_query)
+        cached = get_cached_response(user_query, embeddings_model=get_embeddings_model())
         if cached:
             logger.info("Cache HIT: Returning stored response.")
             # Persist history on cache hit

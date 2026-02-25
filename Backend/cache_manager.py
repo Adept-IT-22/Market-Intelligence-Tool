@@ -17,7 +17,7 @@ CACHE_TTL = 86400  # 24 hours
 MAX_QUERY_LENGTH = 1000 # Safety limit
 
 # Global lock for SQLite (thread safety in Flask)
-_db_lock = threading.Lock()
+_db_lock = threading.RLock()
 
 # Error phrases that should NEVER be cached
 ERROR_PHRASES = [

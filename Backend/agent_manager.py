@@ -1,4 +1,4 @@
- import os
+import os
 import sqlite3
 import pandas as pd
 import httpx
@@ -42,14 +42,28 @@ VERTEX_ENDPOINT = (
 def _build_system_prompt(chat_history=None) -> str:
     """Consolidated system prompt logic for consistency."""
     prompt = (
-        "You are 'Adept Intelligence', a premium Market Research Assistant specializing in Kenyan economic sectors and Adept Technologies innovations.\n"
+        "You are an expert Market Intelligence Analyst for Adept Technologies Ltd.\n"
+        "COMPANY CONTEXT:\n"
+        "Adept Technologies Ltd. is headquartered in Nairobi, Kenya.\n"
+        "When users refer to 'abroad', 'international', or 'overseas', they mean OUTSIDE Kenya.\n"
+        "'Local' means within Kenya. Always interpret geographic terms relative to Kenya as the home base.\n\n"
         "Instructions:\n"
         "1. Prioritize provided context. If the answer is not in the context, say so.\n"
-        "2. Keep responses professional, data-driven, and highly structured.\n"
-        "3. Interpret terms like 'abroad' or 'overseas' as outside Kenya.\n"
+        "2. Keep responses professional, data-driven, and highly structured using clear Markdown.\n"
+        "3. INLINE CITATIONS: When citing sources in the text, use ONLY the markdown link format: [Filename](URI).\n"
+        "   - Display text = clean filename only (e.g., 'ProjectSheet.pdf')\n"
+        "   - URI = full path from context\n"
+        "   - DO NOT add the path in parentheses after the link\n"
+        "   - Example: ...mentioned in [Report.pdf](C:\\path\\to\\Report.pdf)\n"
+        "4. REFERENCES SECTION: At the end, list unique sources under a 'References' header.\n"
+        "   - Format: Bullet point + markdown link ONLY\n"
+        "   - Example: • [ProjectSheet.pdf](C:\\full\\path\\to\\file.pdf)\n"
     )
     if chat_history:
-        prompt += f"\nRecent History Context:\n{chat_history}"
+        # Take last 6 messages to avoid context overflow but maintain continuity
+        recent_history = chat_history[-6:]
+        history_lines = [f"{m['role'].upper()}: {m['content']}" for m in recent_history]
+        prompt += "\n=== CONVERSATION HISTORY ===\n" + "\n".join(history_lines) + "\n"
     return prompt
 
 async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None]:
@@ -1004,45 +1018,12 @@ class AgentManager:
             
         if semantic_data is None: semantic_data = ""
         
-        # Create a "Thought Trace" to prove Level 1 routing is working
-        thought_trace = ""
-        if routing_tables:
-            thought_trace = "\n\n> **AI Thought Trace (Level 1 Routing)**: \n> " + \
-                           ", ".join([f"`{t}`" for t in routing_tables]) + "\n\n"
-
-        system_prompt = (
-            "You are an expert Market Intelligence Analyst for Adept Technologies Ltd. "
-            "COMPANY CONTEXT: Adept Technologies Ltd. is headquartered in Nairobi, Kenya. "
-            "When users refer to 'abroad', 'international', or 'overseas', they mean OUTSIDE Kenya. "
-            "'Local' means within Kenya. Always interpret geographic terms relative to Kenya as the home base.\n\n"
-            "Synthesize the provided data to answer the User Query accurately. "
-            "Formatting Rules:\n"
-            "1. Use clear, professional Markdown.\n"
-            "2. INLINE CITATIONS: When citing sources in the text, use ONLY the markdown link format: [Filename](URI).\n"
-            "   - Display text = clean filename only (e.g., 'ProjectSheet.pdf')\n"
-            "   - URI = full path from context\n"
-            "   - DO NOT add the path in parentheses after the link\n"
-            "   - Example: ...mentioned in [Report.pdf](C:\\path\\to\\Report.pdf) and [Analysis.xlsx](C:\\path\\to\\Analysis.xlsx)\n"
-            "   - WRONG: ...mentioned in 'Report.pdf' (C:\\path\\to\\Report.pdf) [Report.pdf](C:\\path\\to\\Report.pdf)\n"
-            "3. REFERENCES SECTION: At the end, list unique sources under a 'References' header.\n"
-            "   - Format: Bullet point + markdown link ONLY\n"
-            "   - Example: • [ProjectSheet.pdf](C:\\full\\path\\to\\file.pdf)\n"
-            "   - DO NOT add the path in parentheses\n"
-            "   - WRONG: • [ProjectSheet.pdf](C:\\path) (C:\\path\\to\\file.pdf)\n"
-        )
+        # Prepare Unified Prompt
+        system_prompt = _build_system_prompt(self.chat_history)
         
-        # Prepare Chat History for prompt
-        history_text = ""
-        if self.chat_history:
-            # Take last 6 messages to avoid context overflow but maintain continuity
-            recent_history = self.chat_history[-6:]
-            history_lines = [f"{m['role'].upper()}: {m['content']}" for m in recent_history]
-            history_text = "=== CONVERSATION HISTORY ===\n" + "\n".join(history_lines) + "\n\n"
-
         user_prompt = f"""
         User Query: "{self.query}"
         
-        {history_text}
         === SEARCH CONTEXT ===
         {hierarchical_data}
         {semantic_data}
@@ -1070,20 +1051,8 @@ class AgentManager:
              yield from call_gemini_stream_sync(prompt)
              return
 
-        # Build thought trace and prompts...
-        system_prompt = (
-            "You are an expert Market Intelligence Analyst for Adept Technologies Ltd. "
-            "Synthesize the provided data with inline citations [Filename](URI). "
-            "List References at the end."
-        )
-        
-        history_text = ""
-        if self.chat_history:
-            recent_history = self.chat_history[-6:]
-            history_lines = [f"{m['role'].upper()}: {m['content']}" for m in recent_history]
-            history_text = "=== CONVERSATION HISTORY ===\n" + "\n".join(history_lines) + "\n\n"
-
-        user_prompt = f"{history_text}\nQuery: {self.query}\nContext:\n{hierarchical_data}\n{semantic_data}"
+        # Prepare Unified Prompt
+        system_prompt = _build_system_prompt(self.chat_history)
+        user_prompt = f"Query: {self.query}\nContext:\n{hierarchical_data}\n{semantic_data}"
         
         yield from call_gemini_stream_sync(f"{system_prompt}\n\n{user_prompt}")
-

@@ -277,14 +277,11 @@ export class MainSearchComponent implements AfterViewChecked {
         timestamp: new Date()
       };
 
-      this.typewriteResponse(thread, cached.response);
-
-      // Save to guest history
-      if (sessionId && sessionId < 0) {
-        this.chatService.saveGuestMessage(sessionId, { role: 'user', content: query });
-        this.chatService.saveGuestMessage(sessionId, {
-          role: 'assistant', content: cached.response, execution_time: 0
-        });
+      // For authenticated users, notify server to persist history
+      if (sessionId && sessionId > 0) {
+        this.http.post(`${environment.apiUrl}/query`, { query, session_id: sessionId }, {
+          headers: this.auth.getAuthHeaders()
+        }).subscribe(); // Server will cache-hit and persist
       }
 
       // Auto-rename
