@@ -31,7 +31,12 @@ ERROR_PHRASES = [
     "Error connecting to Gemini",
     "error generating the final response",
     "FATAL ERROR",
-    "API limit reached"
+    "API limit reached",
+    "I am sorry, but I cannot provide",
+    "I cannot provide",
+    "does not contain",
+    "not contain any",
+    "could not be found in the provided"
 ]
 
 # Re-use the embedding model from agent_manager to save memory
