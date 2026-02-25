@@ -243,3 +243,8 @@ Backend/test_agent_manager.py
 DEPLOY_COMMANDS.txt
 administrator@192.168.1.250
 
+# Secrets & Credentials
+Backend/service-account.json
+*.pem
+*.key
+

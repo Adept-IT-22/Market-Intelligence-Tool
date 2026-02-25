@@ -7,7 +7,7 @@ This guide explains how to automatically ingest files from SharePoint into the M
 ## Prerequisites
 
 ### Option A: Use Your Staging Server (Recommended for Production)
-If your server at `192.168.1.250` has a **public IP** or is behind a properly configured firewall/NAT with port forwarding, use:
+If your server at `<STAGING_IP>` has a **public IP** or is behind a properly configured firewall/NAT with port forwarding, use:
 - **URL**: `http://<YOUR_PUBLIC_IP>:8000/upload`
 
 ### Option B: Use ngrok for Testing
@@ -53,13 +53,18 @@ Use this URL in Power Automate: `https://abc123.ngrok-free.app/upload`
 2. Configure:
    - **Method**: `POST`
    - **URI**: `http://YOUR_SERVER:8000/upload` (or your ngrok URL)
-   - **Headers**: Leave empty
-   - **Body**: Switch to "Show advanced options" and select:
-     - **Body**: File Content (from previous step)
-   - OR use this raw format:
+   - **Headers**: 
+     - `X-File-Name`: `Name` (Dynamic content from SharePoint trigger)
+   - **Body**: Paste the following JSON:
+     ```json
+     {
+       "$content": "File Content" (Dynamic content from Step 3),
+       "fileName": "Name" (Dynamic content from Step 1),
+       "source": "Marketing" (Change this for each flow: B.Dev, Products, BDC, or BA)
+     }
      ```
-     Content-Type: multipart/form-data
-     ```
+
+**Note**: Power Automate will automatically handle the base64 encoding of the file content when using this JSON format.
 
 ### Alternative: Use "HTTP with Azure AD" if authentication is needed later.
 

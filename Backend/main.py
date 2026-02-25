@@ -1,10 +1,11 @@
-from flask import Flask, request, g, jsonify
+from flask import Flask, request, g, jsonify, Response
+import json
 from flask_cors import CORS
 import time
 import os
 from dotenv import load_dotenv
 import logging
-from agent_manager import AgentManager
+from agent_manager import AgentManager, get_embeddings_model
 from typing import Dict
 from models import (
     init_chat_tables, create_user, get_user_by_email, get_user_by_id,
@@ -13,6 +14,7 @@ from models import (
     add_chat_message, get_chat_messages, update_user_password
 )
 from auth import hash_password, verify_password, create_token, jwt_required, jwt_optional
+from cache_manager import get_cached_response, set_cached_response
 
 #Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -194,33 +196,49 @@ def run_query():
     logger.info("=== Incoming Query Request ===")
 
     try:
-        # Get data from JSON body
         data = request.json
         if not data:
-            logger.error("No JSON data received")
             return jsonify({"error": "No JSON body found"}), 400
 
         user_query = data.get("query")
         session_id = data.get("session_id")
+        stream = data.get("stream", False)
 
         if not user_query:
-            logger.error("No query found in payload")
             return jsonify({"error": "Missing 'query' field"}), 400
 
-        logger.info(f"Query: {user_query}")
-        logger.info(f"Session: {session_id}, User: {getattr(g, 'user_id', 'Guest')}")
-
-        # If session_id is provided and user is logged in, save user message
+        # --- 1. Identity & Context ---
         user_id = getattr(g, 'user_id', None)
+        logger.info(f"Query: {user_query} | Session: {session_id} | User: {user_id or 'Guest'}")
+
+        # --- 2. Check Cache ---
+        cached = get_cached_response(user_query, embeddings_model=get_embeddings_model())
+        if cached:
+            logger.info("Cache HIT: Returning stored response.")
+            # Persist history on cache hit
+            if session_id and user_id:
+                try:
+                    add_chat_message(session_id, 'user', user_query)
+                    add_chat_message(session_id, 'assistant', cached, 0.0)
+                except Exception as e:
+                    logger.warning(f"Failed to save history for cache hit: {e}")
+
+            if not stream:
+                return jsonify({"Results": cached, "execution_time": 0.0, "cached": True})
+            else:
+                def generate_cached():
+                    yield f"data: {json.dumps({'chunk': cached})}\n\n"
+                    yield f"data: {json.dumps({'done': True, 'execution_time': 0.0, 'cached': True})}\n\n"
+                return Response(generate_cached(), mimetype='text/event-stream')
+
+        # --- 3. Save User Message (Start of Live Pipeline) ---
         if session_id and user_id:
             try:
                 add_chat_message(session_id, 'user', user_query)
             except Exception as e:
                 logger.warning(f"Failed to save user message: {e}")
-        else:
-            logger.info("Guest user: Skipping chat history persistence.")
 
-        # Fetch chat history for context
+        # --- 4. Fetch History for Context ---
         chat_history = []
         if session_id:
             try:
@@ -228,32 +246,38 @@ def run_query():
             except Exception as e:
                 logger.warning(f"Failed to fetch chat history: {e}")
 
-        # Initialize Agent and Pipeline
-        logger.info("Initializing AgentManager...")
         manager = AgentManager(query=user_query, chat_history=chat_history)
         
-        logger.info("Executing Pipeline...")
-        results = manager.pipeline()
+        # --- 5. Execute Pipeline ---
+        if stream:
+            def generate():
+                full_response = ""
+                for chunk in manager.pipeline_stream():
+                    full_response += chunk
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                
+                duration = time.perf_counter() - start_time
+                if session_id and user_id:
+                    try:
+                        add_chat_message(session_id, 'assistant', full_response, round(duration, 2))
+                    except Exception as e:
+                        logger.warning(f"Failed to save assistant history: {e}")
+                
+                set_cached_response(user_query, full_response)
+                yield f"data: {json.dumps({'done': True, 'execution_time': round(duration, 2)})}\n\n"
 
-        logger.info("Synthesis complete. Formatting response...")
-        duration = time.perf_counter() - start_time
-        response_text = str(results)
-        
-        # If session_id is provided and user is logged in, save assistant message
-        if session_id and user_id:
-            try:
-                add_chat_message(session_id, 'assistant', response_text, round(duration, 2))
-            except Exception as e:
-                logger.warning(f"Failed to save assistant message: {e}")
-
-        logger.info(f"Query handled successfully in {duration:.2f}s")
-        
-        # Append sign-up encouragement for guests
-        final_response = response_text
-        if not user_id:
-            final_response += '<p style="font-size: 10px; color: gray; text-align: center; margin-top: 20px;"><em>Note: Your chat history is not being saved. <a href="/auth/login" style="color: inherit;">Sign up or Log in</a> to keep track of your research sessions.</em></p>'
-
-        return jsonify({"Results": final_response, "execution_time": round(duration, 2)})
+            return Response(generate(), mimetype='text/event-stream')
+        else:
+            results = manager.pipeline()
+            duration = time.perf_counter() - start_time
+            if session_id and user_id:
+                try:
+                    add_chat_message(session_id, 'assistant', results, round(duration, 2))
+                except Exception as e:
+                    logger.warning(f"Failed to save assistant message: {e}")
+            
+            set_cached_response(user_query, str(results))
+            return jsonify({"Results": results, "execution_time": round(duration, 2)})
 
     except Exception as e:
         logger.exception("FATAL ERROR in /query endpoint")
@@ -355,6 +379,15 @@ def upload_file():
             "error": f"File too large. Maximum size: {MAX_FILE_SIZE_MB}MB"
         }, 400
     
+    # Decode information
+    department = "General"
+    if 'data' in locals() and isinstance(data, dict):
+         # Extract department from JSON (Power Automate)
+         department = data.get('source', data.get('dept', data.get('category', 'General')))
+    elif request.args.get('source'):
+         # Extract from Query Param (if used)
+         department = request.args.get('source')
+
     # Save the file
     from werkzeug.utils import secure_filename
     clean_filename = secure_filename(filename)
@@ -365,12 +398,12 @@ def upload_file():
     try:
         with open(file_path, "wb") as f:
             f.write(content)
-        logger.info(f"File uploaded: {unique_filename} ({file_size / 1024:.1f} KB)")
+        logger.info(f"File uploaded: {unique_filename} ({file_size / 1024:.1f} KB) -> Dept: {department}")
         
         # --- Trigger Automatic Ingestion ---
         try:
             from ingest_data import DataIngester
-            logger.info(f"Auto-ingesting file: {unique_filename}")
+            logger.info(f"Auto-ingesting file: {unique_filename} for {department}")
             ingester = DataIngester()
             
             # Determine type
@@ -388,8 +421,9 @@ def upload_file():
                 input_path=file_path,
                 source_type=f_type,
                 title=filename,
-                sectors="General", # Default sector
-                summary="Uploaded via API"
+                sectors="General", 
+                summary="Uploaded via SharePoint Automation",
+                department=department
             )
             logger.info("Auto-ingestion successful.")
             
