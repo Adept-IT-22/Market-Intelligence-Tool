@@ -1,4 +1,4 @@
-import os
+ import os
 import sqlite3
 import pandas as pd
 import httpx
@@ -284,13 +284,12 @@ async def _call_gemini_api_internal(prompt: str) -> str:
 
 async def call_gemini_async(prompt: str) -> str:
     """Call Gemini with thread-safe rate limiting."""
-    global _last_call_time
-    with _gemini_lock:
+    async with asyncio.Lock():
         import time as _time
         now = _time.time()
         elapsed = now - _last_call_time
         if elapsed < RATE_LIMIT_SECONDS:
-            _time.sleep(RATE_LIMIT_SECONDS - elapsed)
+            await asyncio.sleep(RATE_LIMIT_SECONDS - elapsed)
         _last_call_time = _time.time()
     return await _call_gemini_api_internal(prompt)
 
