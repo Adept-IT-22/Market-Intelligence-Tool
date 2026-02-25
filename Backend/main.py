@@ -212,7 +212,7 @@ def run_query():
         logger.info(f"Query: {user_query} | Session: {session_id} | User: {user_id or 'Guest'}")
 
         # --- 2. Check Cache ---
-        cached = get_cached_response(user_query, embeddings_model=get_embeddings_model())
+        cached = get_cached_response(user_query)
         if cached:
             logger.info("Cache HIT: Returning stored response.")
             # Persist history on cache hit

@@ -66,65 +66,6 @@ def _build_system_prompt(chat_history=None) -> str:
         prompt += "\n=== CONVERSATION HISTORY ===\n" + "\n".join(history_lines) + "\n"
     return prompt
 
-async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None]:
-    """Robust streaming parser for Vertex AI's JSON array format."""
-    # Note: Rate limiting is handled by the caller or global lock
-    
-    stream_endpoint = VERTEX_ENDPOINT.replace(":generateContent", ":streamGenerateContent")
-    headers = {"Authorization": f"Bearer {get_access_token()}", "Content-Type": "application/json"}
-    data = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.0,
-            "maxOutputTokens": 8192,
-        }
-    }
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        async with client.stream("POST", stream_endpoint, headers=headers, json=data) as response:
-            if response.status_code != 200:
-                err_text = await response.aread()
-                logger.error(f"Gemini Streaming Error {response.status_code}: {err_text}")
-                yield "Error connecting to Gemini stream."
-                return
-
-            buffer = ""
-            async for chunk in response.aiter_text():
-                buffer += chunk
-                while True:
-                    start = buffer.find('{')
-                    if start == -1:
-                        # Clear buffer of non-JSON rubble (like leading [ or ,)
-                        if '}' in buffer: buffer = buffer[buffer.rfind('}')+1:]
-                        break
-                    
-                    depth = 0
-                    end = -1
-                    in_str = False
-                    esc = False
-                    for i in range(start, len(buffer)):
-                        c = buffer[i]
-                        if c == '"' and not esc: in_str = not in_str
-                        elif c == '\\' and in_str: esc = not esc; continue
-                        elif not in_str:
-                            if c == '{': depth += 1
-                            elif c == '}': depth -= 1
-                            if depth == 0:
-                                end = i + 1
-                                break
-                        esc = False
-                    
-                    if end != -1:
-                        obj_str = buffer[start:end]
-                        buffer = buffer[end:]
-                        try:
-                            obj = json.loads(obj_str)
-                            candidates = obj.get('candidates', [])
-                            if candidates:
-                                text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '')
-                                if text: yield text
-                        except Exception: pass
-                    else: break
 
 logger.info(f"Gemini initialized for Project: {PROJECT_ID} in Region: {REGION}")
 
@@ -308,7 +249,7 @@ async def call_gemini_async(prompt: str) -> str:
     return await _call_gemini_api_internal(prompt)
 
 async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None]:
-    """Internal function to call Gemini API with streaming."""
+    """Internal function to call Gemini API with robust JSON streaming."""
     token = get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -322,8 +263,8 @@ async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None
         },
     }
 
-    # Vertex endpoint for streaming
     stream_endpoint = VERTEX_ENDPOINT.replace(":generateContent", ":streamGenerateContent")
+    decoder = json.JSONDecoder()
     
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream("POST", stream_endpoint, headers=headers, json=data) as response:
@@ -333,37 +274,26 @@ async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None
                 yield "Error connecting to Gemini stream."
                 return
 
-            import json
             buffer = ""
             async for chunk in response.aiter_text():
                 buffer += chunk
                 while True:
+                    buffer = buffer.lstrip(" \n\r\t[,")
+                    if not buffer:
+                        break
                     try:
-                        start = buffer.find('{')
-                        if start == -1: break
+                        obj, index = decoder.raw_decode(buffer)
+                        buffer = buffer[index:].lstrip(" \n\r\t,")
                         
-                        depth = 0
-                        end = -1
-                        for i in range(start, len(buffer)):
-                            if buffer[i] == '{': depth += 1
-                            elif buffer[i] == '}': depth -= 1
-                            if depth == 0:
-                                end = i + 1
-                                break
-                        
-                        if end == -1: break
-                        
-                        obj_str = buffer[start:end]
-                        buffer = buffer[end:].strip()
-                        if buffer.startswith(','): buffer = buffer[1:].strip()
-                        
-                        part_json = json.loads(obj_str)
-                        candidates = part_json.get("candidates", [])
+                        candidates = obj.get("candidates", [])
                         if candidates:
                             delta = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
                             if delta:
                                 yield delta
-                    except Exception:
+                    except json.JSONDecodeError:
+                        break
+                    except Exception as e:
+                        logger.error(f"Streaming parser error: {e}")
                         break
 
 async def call_gemini_stream_async(prompt: str) -> Generator[str, None, None]:
@@ -998,9 +928,11 @@ class AgentManager:
         is_fast_path = context_dict.get("Is Fast Path", False)
         
         if is_fast_path:
-             # Very simple prompt for greetings to be fast and personal
+             # Fast-path prompt for greetings
+             system_prompt = _build_system_prompt() # No history needed for simple greeting
+             prompt = f"{system_prompt}\n\nThe user said: '{self.query}'. Reply politely and professionally as the Adept Market Intelligence Assistant. Mention that you are ready to help with market research or document analysis."
              try:
-                 content = call_gemini_sync(f"The user said: '{self.query}'. Reply politely and professionally as the Adept Market Intelligence Assistant. Mention that you are ready to help with market research or document analysis.")
+                 content = call_gemini_sync(prompt)
                  return content
              except Exception:
                  return "Hello! I am your Adept Market Intelligence Assistant. How can I help you with your research today?"
@@ -1022,14 +954,14 @@ class AgentManager:
         system_prompt = _build_system_prompt(self.chat_history)
         
         user_prompt = f"""
-        User Query: "{self.query}"
-        
-        === SEARCH CONTEXT ===
-        {hierarchical_data}
-        {semantic_data}
-        
-        Provide a detailed response with inline citations and a references list at the bottom.
-        """
+User Query: "{self.query}"
+
+=== SEARCH CONTEXT ===
+{hierarchical_data}
+{semantic_data}
+
+Provide a detailed response with inline citations and a references list at the bottom.
+"""
         
         try:
             content = call_gemini_sync(f"{system_prompt}\n\n{user_prompt}")
@@ -1047,12 +979,22 @@ class AgentManager:
         is_fast_path = context_dict.get("Is Fast Path", False)
 
         if is_fast_path:
-             prompt = f"The user said: '{self.query}'. Reply politely as the Adept Market Intelligence Assistant."
+             # Fast-path prompt for greetings
+             system_prompt = _build_system_prompt()
+             prompt = f"{system_prompt}\n\nThe user said: '{self.query}'. Reply politely and professionally as the Adept Market Intelligence Assistant. Mention that you are ready to help with market research or document analysis."
              yield from call_gemini_stream_sync(prompt)
              return
 
         # Prepare Unified Prompt
         system_prompt = _build_system_prompt(self.chat_history)
-        user_prompt = f"Query: {self.query}\nContext:\n{hierarchical_data}\n{semantic_data}"
+        user_prompt = f"""
+User Query: "{self.query}"
+
+=== SEARCH CONTEXT ===
+{hierarchical_data}
+{semantic_data}
+
+Provide a detailed response with inline citations and a references list at the bottom.
+"""
         
         yield from call_gemini_stream_sync(f"{system_prompt}\n\n{user_prompt}")
