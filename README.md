@@ -55,7 +55,8 @@ A high-performance, AI-driven analytics platform designed to provide deep insigh
 # Backend
 cd Backend
 python -m venv venv
-.\venv\Scripts\activate
+# Windows: .\venv\Scripts\activate
+# Linux/Mac: source venv/bin/activate
 pip install -r requirements.txt
 python main.py
 
@@ -85,7 +86,7 @@ The application is deployed via Docker Compose on the staging server (`192.168.1
 - **API Engine**: `http://192.168.1.250:8000`
 
 ### Update Workflow
-1. **Local**: `git push origin feature/multi-flow-sourcing`
+1. **Local**: `git push origin <your-feature-branch>`
 2. **Server**: `ssh administrator@192.168.1.250 "cd ~/mkt-int/Market-Intelligence-Tool && git pull && docker compose restart"`
 
 ---

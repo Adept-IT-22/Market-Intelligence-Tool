@@ -13,7 +13,7 @@ import logging
 import json
 import re
 from urllib.parse import urlparse
-from typing import Optional, Any, Generator
+from typing import Optional, Any, Generator, AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
 import queue
 import threading
@@ -70,8 +70,7 @@ def _build_system_prompt(chat_history=None) -> str:
 logger.info(f"Gemini initialized for Project: {PROJECT_ID} in Region: {REGION}")
 
 # --- Concurrency & Rate Limiting ---
-# Thread-safe rate limiting (no asyncio locks - they break across Flask threads)
-RATE_LIMIT_SECONDS = 0.1
+RATE_LIMIT_SECONDS = 0.5  # Slightly more conservative
 _gemini_lock = threading.Lock()
 _last_call_time = 0
 
@@ -238,18 +237,39 @@ async def _call_gemini_api_internal(prompt: str) -> str:
     raise RuntimeError("Gemini Max Retries Exceeded (Unknown Error)")
 
 async def call_gemini_async(prompt: str) -> str:
-    """Call Gemini with thread-safe rate limiting."""
-    async with asyncio.Lock():
+    """Call Gemini with multi-loop safe rate limiting."""
+    global _last_call_time
+    sleep_time = 0
+    with _gemini_lock:
         import time as _time
         now = _time.time()
         elapsed = now - _last_call_time
         if elapsed < RATE_LIMIT_SECONDS:
-            await asyncio.sleep(RATE_LIMIT_SECONDS - elapsed)
-        _last_call_time = _time.time()
+            sleep_time = RATE_LIMIT_SECONDS - elapsed
+            _last_call_time = now + sleep_time
+        else:
+            _last_call_time = now
+            
+    if sleep_time > 0:
+        await asyncio.sleep(sleep_time)
     return await _call_gemini_api_internal(prompt)
 
-async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None]:
-    """Internal function to call Gemini API with robust JSON streaming."""
+async def _call_gemini_stream_internal(prompt: str) -> AsyncGenerator[str, None]:
+    """Internal function to call Gemini API with multi-loop safe streaming."""
+    global _last_call_time
+    sleep_time = 0
+    with _gemini_lock:
+        import time as _time
+        now = _time.time()
+        elapsed = now - _last_call_time
+        if elapsed < RATE_LIMIT_SECONDS:
+            sleep_time = RATE_LIMIT_SECONDS - elapsed
+            _last_call_time = now + sleep_time
+        else:
+            _last_call_time = now
+
+    if sleep_time > 0:
+        await asyncio.sleep(sleep_time)
     token = get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -296,7 +316,7 @@ async def _call_gemini_stream_internal(prompt: str) -> Generator[str, None, None
                         logger.error(f"Streaming parser error: {e}")
                         break
 
-async def call_gemini_stream_async(prompt: str) -> Generator[str, None, None]:
+async def call_gemini_stream_async(prompt: str) -> AsyncGenerator[str, None]:
     async for chunk in _call_gemini_stream_internal(prompt):
         yield chunk
 
@@ -309,17 +329,26 @@ def call_gemini_sync(prompt: str) -> str:
         raise
 
 def call_gemini_stream_sync(prompt: str):
-    """Bridge to run async generator in sync context for Flask."""
+    """Bridge to run async generator in sync context for Flask.
+
+    Uses a daemon thread + stop event so the background loop is cancelled
+    if the client disconnects early (generator is closed).
+    """
     q = queue.Queue()
     loop = asyncio.new_event_loop()
+    stop_event = threading.Event()
 
     def run_async():
         asyncio.set_event_loop(loop)
         try:
             async def wrap():
-                async for chunk in call_gemini_stream_async(prompt):
-                    q.put(chunk)
-                q.put(None) # End signal
+                try:
+                    async for chunk in call_gemini_stream_async(prompt):
+                        if stop_event.is_set():
+                            break
+                        q.put(chunk)
+                finally:
+                    q.put(None)  # Always signal end-of-stream
             loop.run_until_complete(wrap())
         except Exception as e:
             logger.error(f"Streaming thread error: {e}")
@@ -327,13 +356,17 @@ def call_gemini_stream_sync(prompt: str):
         finally:
             loop.close()
 
-    import threading
-    threading.Thread(target=run_async).start()
-    
-    while True:
-        chunk = q.get()
-        if chunk is None: break
-        yield chunk
+    worker = threading.Thread(target=run_async, daemon=True)  # daemon=True prevents leaks
+    worker.start()
+
+    try:
+        while True:
+            chunk = q.get()
+            if chunk is None:
+                break
+            yield chunk
+    finally:
+        stop_event.set()  # Signal background thread to stop on early disconnect
 
 class AgentManager:
     def __init__(
@@ -400,7 +433,7 @@ class AgentManager:
         return os.path.basename(uri)
 
     def get_table_schema(self, table_name):
-        conn = sqlite3.connect(self.database_path)
+        conn = sqlite3.connect(self.database_path, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute(f"PRAGMA table_info('{table_name}')")
         schema = cursor.fetchall()
@@ -453,7 +486,7 @@ class AgentManager:
         keyword_scores = {} # Map table_name -> score
         high_confidence_keyword_tables = set()  # Tables with 2+ keyword matches (auto-include)
         if keywords:
-            conn = sqlite3.connect(self.database_path)
+            conn = sqlite3.connect(self.database_path, check_same_thread=False)
             try:
                 # Improved Keyword Search: Rank by number of match hits
                 # Increase weight for Title significantly over Summary since Summaries might be generic
@@ -504,7 +537,7 @@ class AgentManager:
             return []
 
         # 2. Fetch only the relevant Master entries
-        conn = sqlite3.connect(self.database_path)
+        conn = sqlite3.connect(self.database_path, check_same_thread=False)
         # Validate that candidate table names are safe to include in the query
         safe_candidates = [t for t in candidate_routing_tables if re.match(r'^[a-z0-9_]+$', t)]
         
@@ -586,7 +619,7 @@ class AgentManager:
         if not routing_tables:
             return {'sql_tables': [], 'qdrant_ids': []}
 
-        conn = sqlite3.connect(self.database_path)
+        conn = sqlite3.connect(self.database_path, check_same_thread=False)
         combined_routing_sections = []
         max_total_chars = 15000 # Reduced from 20000 to avoid Groq 6000 token limit
         current_length = 0
@@ -674,7 +707,7 @@ class AgentManager:
         # 1. Fetch SQL Details
         sql_tables = selection.get('sql_tables', [])
         if sql_tables:
-            conn = sqlite3.connect(self.database_path)
+            conn = sqlite3.connect(self.database_path, check_same_thread=False)
             for table in sql_tables:
                 if len(context) >= max_chars: break
                 
@@ -970,23 +1003,21 @@ Provide a detailed response with inline citations and a references list at the b
             logger.error(f"Synthesis failed: {e}")
             return "I encountered an error generating the final response."
 
+
     def get_final_response_stream(self, search_results, context_dict):
-        """Streaming synthesis."""
-        # Setup prompt (similar to get_final_response but for streaming)
+        """Streaming synthesis — uses same system prompt as non-streaming path."""
         hierarchical_data = context_dict.get("Hierarchical Data", "")
         semantic_data = context_dict.get("Semantic Data", "")
-        routing_tables = context_dict.get("Routing Tables", [])
         is_fast_path = context_dict.get("Is Fast Path", False)
 
+        # Use the global shared system prompt builder
+        system_prompt = _build_system_prompt(self.chat_history)
+
         if is_fast_path:
-             # Fast-path prompt for greetings
-             system_prompt = _build_system_prompt()
              prompt = f"{system_prompt}\n\nThe user said: '{self.query}'. Reply politely and professionally as the Adept Market Intelligence Assistant. Mention that you are ready to help with market research or document analysis."
              yield from call_gemini_stream_sync(prompt)
              return
 
-        # Prepare Unified Prompt
-        system_prompt = _build_system_prompt(self.chat_history)
         user_prompt = f"""
 User Query: "{self.query}"
 

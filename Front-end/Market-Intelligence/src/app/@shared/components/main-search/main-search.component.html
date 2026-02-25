@@ -121,7 +121,10 @@
 
                         <!-- Response Footer -->
                         <div class="response-footer" *ngIf="!thread.isTyping">
-                            <span class="time-taken" *ngIf="thread.executionTime">
+                            <span class="cached-badge" *ngIf="thread.isCachedResult">
+                                <mat-icon>history</mat-icon> Cached
+                            </span>
+                            <span class="time-taken" *ngIf="thread.executionTime !== undefined">
                                 <mat-icon>timer</mat-icon> {{ thread.executionTime }}s
                             </span>
                             <div class="actions">
