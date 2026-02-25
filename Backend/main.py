@@ -382,11 +382,18 @@ def upload_file():
     # Decode information
     department = "General"
     if 'data' in locals() and isinstance(data, dict):
-         # Extract department from JSON (Power Automate)
-         department = data.get('source', data.get('dept', data.get('category', 'General')))
+        # Extract department from JSON with multiple aliases (Fix 2 & Fix 3)
+        department = (
+            data.get('department') or
+            data.get('Department') or
+            data.get('source') or
+            data.get('dept') or
+            data.get('category') or
+            "General"
+        )
     elif request.args.get('source'):
-         # Extract from Query Param (if used)
-         department = request.args.get('source')
+        # Extract from Query Param (if used)
+        department = request.args.get('source')
 
     # Save the file
     from werkzeug.utils import secure_filename
@@ -422,7 +429,7 @@ def upload_file():
                 source_type=f_type,
                 title=filename,
                 sectors="General", 
-                summary="Uploaded via SharePoint Automation",
+                summary="Automated Upload via API/SharePoint",
                 department=department
             )
             logger.info("Auto-ingestion successful.")

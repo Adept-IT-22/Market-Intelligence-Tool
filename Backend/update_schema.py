@@ -34,12 +34,13 @@ def migrate_db():
             )
         """)
 
-        # Migration: Add Department to Master if missing
+        # Add Department column if it doesn't exist (Migration for existing DBs)
         try:
             cursor.execute("ALTER TABLE Master ADD COLUMN Department TEXT DEFAULT 'General'")
-            logger.info("Migration: Added 'Department' column to 'Master' table.")
+            logger.info("Added 'Department' column to 'Master' table.")
         except sqlite3.OperationalError:
-            logger.info("Migration: 'Department' column already exists in 'Master'.")
+            # Column already exists
+            logger.info("'Department' column already exists in 'Master' table.")
         
         # 3. Migration Logic
         logger.info("Migrating existing entries from Master_Old to Master...")
