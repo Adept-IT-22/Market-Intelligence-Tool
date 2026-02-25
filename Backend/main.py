@@ -1,4 +1,5 @@
-from flask import Flask, request, g, jsonify
+from flask import Flask, request, g, jsonify, Response
+import json
 from flask_cors import CORS
 import time
 import os
@@ -13,13 +14,15 @@ from models import (
     add_chat_message, get_chat_messages, update_user_password
 )
 from auth import hash_password, verify_password, create_token, jwt_required, jwt_optional
+from cache_manager import get_cached_response, set_cached_response
 
 #Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 
 app = Flask(__name__)
-CORS(app)
+# Enable CORS for all origins, methods, and headers to support multiple devices on staging
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 # Initialize chat tables
 init_chat_tables()
@@ -193,49 +196,88 @@ def run_query():
     logger.info("=== Incoming Query Request ===")
 
     try:
-        # Get data from JSON body
         data = request.json
         if not data:
-            logger.error("No JSON data received")
             return jsonify({"error": "No JSON body found"}), 400
 
         user_query = data.get("query")
         session_id = data.get("session_id")
+        stream = data.get("stream", False)
 
         if not user_query:
-            logger.error("No query found in payload")
             return jsonify({"error": "Missing 'query' field"}), 400
 
-        logger.info(f"Query: {user_query}")
-        logger.info(f"Session: {session_id}, User: {getattr(g, 'user_id', 'Guest')}")
+        # --- 1. Identity & Context ---
+        user_id = getattr(g, 'user_id', None)
+        logger.info(f"Query: {user_query} | Session: {session_id} | User: {user_id or 'Guest'}")
 
-        # If session_id is provided and user is logged in, save user message
-        if session_id and getattr(g, 'user_id', None):
+        # --- 2. Check Cache ---
+        cached = get_cached_response(user_query)
+        if cached:
+            logger.info("Cache HIT: Returning stored response.")
+            # Persist history on cache hit
+            if session_id and user_id:
+                try:
+                    add_chat_message(session_id, 'user', user_query)
+                    add_chat_message(session_id, 'assistant', cached, 0.0)
+                except Exception as e:
+                    logger.warning(f"Failed to save history for cache hit: {e}")
+
+            if not stream:
+                return jsonify({"Results": cached, "execution_time": 0.0, "cached": True})
+            else:
+                def generate_cached():
+                    yield f"data: {json.dumps({'chunk': cached})}\n\n"
+                    yield f"data: {json.dumps({'done': True, 'execution_time': 0.0, 'cached': True})}\n\n"
+                return Response(generate_cached(), mimetype='text/event-stream')
+
+        # --- 3. Save User Message (Start of Live Pipeline) ---
+        if session_id and user_id:
             try:
                 add_chat_message(session_id, 'user', user_query)
             except Exception as e:
                 logger.warning(f"Failed to save user message: {e}")
 
-        # Initialize Agent and Pipeline
-        logger.info("Initializing AgentManager...")
-        manager = AgentManager(query=user_query)
-        
-        logger.info("Executing Pipeline...")
-        results = manager.pipeline()
-
-        logger.info("Synthesis complete. Formatting response...")
-        duration = time.perf_counter() - start_time
-        response_text = str(results)
-        
-        # If session_id is provided and user is logged in, save assistant message
-        if session_id and getattr(g, 'user_id', None):
+        # --- 4. Fetch History for Context ---
+        chat_history = []
+        if session_id:
             try:
-                add_chat_message(session_id, 'assistant', response_text, round(duration, 2))
+                chat_history = get_chat_messages(session_id)
             except Exception as e:
-                logger.warning(f"Failed to save assistant message: {e}")
+                logger.warning(f"Failed to fetch chat history: {e}")
 
-        logger.info(f"Query handled successfully in {duration:.2f}s")
-        return jsonify({"Results": response_text, "execution_time": round(duration, 2)})
+        manager = AgentManager(query=user_query, chat_history=chat_history)
+        
+        # --- 5. Execute Pipeline ---
+        if stream:
+            def generate():
+                full_response = ""
+                for chunk in manager.pipeline_stream():
+                    full_response += chunk
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                
+                duration = time.perf_counter() - start_time
+                if session_id and user_id:
+                    try:
+                        add_chat_message(session_id, 'assistant', full_response, round(duration, 2))
+                    except Exception as e:
+                        logger.warning(f"Failed to save assistant history: {e}")
+                
+                set_cached_response(user_query, full_response)
+                yield f"data: {json.dumps({'done': True, 'execution_time': round(duration, 2)})}\n\n"
+
+            return Response(generate(), mimetype='text/event-stream')
+        else:
+            results = manager.pipeline()
+            duration = time.perf_counter() - start_time
+            if session_id and user_id:
+                try:
+                    add_chat_message(session_id, 'assistant', results, round(duration, 2))
+                except Exception as e:
+                    logger.warning(f"Failed to save assistant message: {e}")
+            
+            set_cached_response(user_query, str(results))
+            return jsonify({"Results": results, "execution_time": round(duration, 2)})
 
     except Exception as e:
         logger.exception("FATAL ERROR in /query endpoint")
@@ -262,63 +304,126 @@ def upload_file():
     """
     start_time = time.perf_counter()
     
-    if 'file' not in request.files:
-        return {"error": "No file part in the request"}, 400
+    # Log incoming request details for debugging
+    logger.info(f"Upload request - Content-Type: {request.content_type}, Content-Length: {request.content_length}, Headers: X-File-Name={request.headers.get('X-File-Name', 'MISSING')}")
     
-    file = request.files['file']
+    # Support for Multipart Form (Frontend), Raw Binary, and JSON (Power Automate)
+    content = b''
+    filename = f"upload_{int(time.time())}.pdf"
     
-    if file.filename == '':
-        return {"error": "No file selected"}, 400
+    try:
+        if 'file' in request.files:
+            file = request.files['file']
+            if file.filename == '':
+                return {"error": "No file selected"}, 400
+            filename = file.filename
+            content = file.read()
+        else:
+            # Handle API/Power Automate uploads
+            # 1. Get raw data first
+            raw_body = request.get_data()
+            
+            # 2. Try to parse as JSON regardless of Content-Type (Power Automate often sends mismatched headers)
+            is_valid_json = False
+            try:
+                # Only try parsing if it looks like JSON to avoid overhead/errors on large binaries
+                if raw_body and raw_body.strip().startswith(b'{'):
+                    import json
+                    data = json.loads(raw_body)
+                    is_valid_json = True
+                    
+                    logger.info(f"JSON upload - Keys received: {list(data.keys())}")
+                    filename = request.headers.get('X-File-Name', data.get('fileName', filename))
+                    body = data.get('$content', data.get('content', data.get('body', '')))
+                    
+                    # Decode base64 if present
+                    import base64
+                    try:
+                        content = base64.b64decode(body) if body else b''
+                        logger.info(f"JSON upload - Decoded {len(content)} bytes successfully")
+                    except Exception as b64_err:
+                        # Fallback: maybe it's not base64 but raw string?
+                        logger.warning(f"JSON base64 decode failed, using raw body value: {b64_err}")
+                        content = body.encode('utf-8') if isinstance(body, str) else b''
+            except Exception as json_err:
+                logger.info(f"Not valid JSON (treating as binary): {json_err}")
+            
+            # 3. If not JSON, treat raw body as the file content
+            if not is_valid_json:
+                content = raw_body
+                filename = request.headers.get('X-File-Name', filename)
+                logger.info(f"Binary upload - Content length: {len(content)} bytes")
+
+    except Exception as parse_err:
+        logger.error(f"Upload parsing error: {parse_err}")
+        return {"error": f"Failed to parse upload: {str(parse_err)}"}, 400
     
-    # Validate file type
-    if not allowed_file(file.filename):
-        return {
-            "error": f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
-        }, 400
+    if not content:
+        logger.error(f"Upload failed: No content received. Content-Type: {request.content_type}")
+        return {"error": "No file content found in request body"}, 400
+
+    # Validate file type (skip for API uploads without proper filename)
+    if not allowed_file(filename):
+        # If filename has no extension, default to .pdf
+        if '.' not in filename:
+            filename = filename + '.pdf'
+        elif not allowed_file(filename):
+            return {
+                "error": f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+            }, 400
     
     # Validate file size
-    file.seek(0, os.SEEK_END)
-    file_size = file.tell()
-    file.seek(0)
-    
+    file_size = len(content)
     if file_size > MAX_FILE_SIZE_BYTES:
         return {
             "error": f"File too large. Maximum size: {MAX_FILE_SIZE_MB}MB"
         }, 400
     
+    # Decode information
+    department = "General"
+    if 'data' in locals() and isinstance(data, dict):
+         # Extract department from JSON (Power Automate)
+         department = data.get('source', data.get('dept', data.get('category', 'General')))
+    elif request.args.get('source'):
+         # Extract from Query Param (if used)
+         department = request.args.get('source')
+
     # Save the file
     from werkzeug.utils import secure_filename
-    filename = secure_filename(file.filename)
+    clean_filename = secure_filename(filename)
     timestamp = int(time.time())
-    unique_filename = f"{timestamp}_{filename}"
+    unique_filename = f"{timestamp}_{clean_filename}"
     file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
     
     try:
-        file.save(file_path)
-        logger.info(f"File uploaded: {unique_filename} ({file_size / 1024:.1f} KB)")
+        with open(file_path, "wb") as f:
+            f.write(content)
+        logger.info(f"File uploaded: {unique_filename} ({file_size / 1024:.1f} KB) -> Dept: {department}")
         
         # --- Trigger Automatic Ingestion ---
         try:
             from ingest_data import DataIngester
-            logger.info(f"Auto-ingesting file: {unique_filename}")
+            logger.info(f"Auto-ingesting file: {unique_filename} for {department}")
             ingester = DataIngester()
             
             # Determine type
-            ext = filename.rsplit('.', 1)[1].lower()
+            ext = clean_filename.rsplit('.', 1)[1].lower() if '.' in clean_filename else 'pdf'
             type_map = {
                 'xlsx': 'excel', 'xls': 'excel', 
                 'pdf': 'pdf', 'docx': 'docx', 'pptx': 'pptx',
+                'txt': 'pdf', 'csv': 'excel', 'md': 'pdf',
                 'png': 'image', 'jpg': 'image', 'jpeg': 'image', 'webp': 'image'
             }
-            f_type = type_map.get(ext, 'auto')
+            f_type = type_map.get(ext, 'pdf')
             
             # Process
             ingester.process_input(
                 input_path=file_path,
                 source_type=f_type,
                 title=filename,
-                sectors="General", # Default sector
-                summary="Uploaded via API"
+                sectors="General", 
+                summary="Uploaded via SharePoint Automation",
+                department=department
             )
             logger.info("Auto-ingestion successful.")
             

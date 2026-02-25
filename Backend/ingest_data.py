@@ -89,15 +89,15 @@ class DataIngester:
         if not text: return []
         return [text[i:i+size] for i in range(0, len(text), size)]
 
-    def process_input(self, input_path: str, source_type: str, title: str, sectors: str, summary: str):
-        logger.info(f"Processing {source_type}: {input_path}")
+    def process_input(self, input_path: str, source_type: str, title: str, sectors: str, summary: str, department: str = "General"):
+        logger.info(f"Processing {source_type}: {input_path} for department: {department}")
         
         # Normalize input path
         if not input_path.startswith(('http://', 'https://')):
             input_path = os.path.abspath(input_path)
 
         # Validate Input BEFORE creating Master entry
-        supported_types = ['excel', 'pdf', 'url', 'docx', 'pptx', 'image']
+        supported_types = ['excel', 'pdf', 'url', 'docx', 'pptx', 'image', 'md']
         st_lower = source_type.lower()
         if st_lower not in supported_types:
              logger.error(f"Unsupported source type: {source_type}")
@@ -113,21 +113,23 @@ class DataIngester:
 
         try:
              # 1. Level 1: Insert into Master and get assigned ID
-            master_id, routing_table_name = self._create_master_entry(title, input_path, source_type, summary, sectors)
+            master_id, routing_table_name = self._create_master_entry(title, input_path, source_type, summary, sectors, department)
             
             # 2. Level 2 & 3: Process content
             if st_lower == 'excel' or input_path.endswith(('.xlsx', '.xls')):
-                self._process_excel(input_path, master_id, routing_table_name, sectors)
+                self._process_excel(input_path, master_id, routing_table_name, sectors, department)
             elif st_lower == 'pdf' or input_path.endswith('.pdf'):
-                self._process_pdf(input_path, master_id, routing_table_name, sectors)
+                self._process_pdf(input_path, master_id, routing_table_name, sectors, department)
             elif st_lower == 'url':
-                self._process_url(input_path, master_id, routing_table_name, sectors)
+                self._process_url(input_path, master_id, routing_table_name, sectors, department)
             elif st_lower == 'docx' or input_path.endswith('.docx'):
-                self._process_docx(input_path, master_id, routing_table_name, sectors)
+                self._process_docx(input_path, master_id, routing_table_name, sectors, department)
             elif st_lower == 'pptx' or input_path.endswith('.pptx'):
-                self._process_pptx(input_path, master_id, routing_table_name, sectors)
+                self._process_pptx(input_path, master_id, routing_table_name, sectors, department)
             elif st_lower == 'image' or input_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-                self._process_image(input_path, master_id, routing_table_name, sectors)
+                self._process_image(input_path, master_id, routing_table_name, sectors, department)
+            elif st_lower == 'md' or input_path.endswith('.md'):
+                self._process_md(input_path, master_id, routing_table_name, sectors, department)
             
             self.summary_report["success"].append(input_path)
             logger.info("Ingestion Complete.")
@@ -147,16 +149,16 @@ class DataIngester:
                     logger.error(f"Rollback failed: {rollback_err}")
             raise e
 
-    def _create_master_entry(self, title, source, source_type, summary, sectors):
+    def _create_master_entry(self, title, source, source_type, summary, sectors, department):
         # Create unique routing table name prefix
         safe_title = "".join([c if c.isalnum() else "_" for c in title]).lower()
         month_str = datetime.now().strftime("%B %Y")
         
-        logger.info(f"Creating Master Entry: {title}")
+        logger.info(f"Creating Master Entry: {title} (Dept: {department})")
         self.cursor.execute("""
-            INSERT INTO Master (Title, Source, Summary, Datatype, Sectors, table_name, month_created)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (title, source, summary, source_type, sectors, "PENDING", month_str))
+            INSERT INTO Master (Title, Source, Summary, Datatype, Sectors, table_name, month_created, Department)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (title, source, summary, source_type, sectors, "PENDING", month_str, department))
         
         master_id = self.cursor.lastrowid
         routing_table_name = f"route_{safe_title[:20]}_{master_id}"
@@ -180,13 +182,14 @@ class DataIngester:
                 Title TEXT,
                 Datatype TEXT,
                 Sectors TEXT,
+                Department TEXT,     -- NEW COLUMN
                 table_name TEXT,       -- For SQL Details
                 qdrant_source TEXT,    -- For Text Details
                 qdrant_point_id TEXT   -- For Text Details
             )
         """)
 
-    def _process_excel(self, file_path, master_id, routing_table_name, sectors):
+    def _process_excel(self, file_path, master_id, routing_table_name, sectors, department):
         try:
             xls = pd.ExcelFile(file_path)
             for sheet_name in xls.sheet_names:
@@ -206,21 +209,21 @@ class DataIngester:
                 df.to_sql(detail_table_name, self.conn, if_exists='replace', index=False)
                 
                 self.cursor.execute(f"""
-                    INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, table_name)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (master_id, f"Sheet: {sheet_name}", "SQL", sectors, detail_table_name))
+                    INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, Department, table_name)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (master_id, f"Sheet: {sheet_name}", "SQL", sectors, department, detail_table_name))
             self.conn.commit()
         except Exception as e:
             logger.error(f"Excel processing failed for {file_path}: {e}")
             raise e
 
-    def _process_pdf(self, file_path, master_id, routing_table_name, sectors):
+    def _process_pdf(self, file_path, master_id, routing_table_name, sectors, department):
         try:
             reader = pypdf.PdfReader(file_path)
             for i, page in enumerate(reader.pages):
                 text = page.extract_text()
                 if not text or not text.strip(): continue
-                self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, f"Page {i+1}")
+                self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, department, f"Page {i+1}")
             self.conn.commit()
         except Exception as e:
             logger.error(f"PDF processing failed for {file_path}: {e}")
@@ -267,20 +270,20 @@ class DataIngester:
             pass
         return "\n".join(texts)
 
-    def _process_docx(self, file_path, master_id, routing_table_name, sectors):
+    def _process_docx(self, file_path, master_id, routing_table_name, sectors, department):
         try:
             doc = Document(file_path)
             text = self._extract_docx_text(doc)
             if not text or not text.strip():
                 logger.warning(f"Skipping DOCX with no extractable text: {file_path}")
                 return
-            self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, "Document Content")
+            self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, department, "Document Content")
             self.conn.commit()
         except Exception as e:
             logger.error(f"Docx processing failed for {file_path}: {e}")
             raise e
 
-    def _process_pptx(self, file_path, master_id, routing_table_name, sectors):
+    def _process_pptx(self, file_path, master_id, routing_table_name, sectors, department):
         try:
             prs = Presentation(file_path)
             for i, slide in enumerate(prs.slides):
@@ -290,13 +293,13 @@ class DataIngester:
                         text_runs.append(shape.text)
                 text = "\n".join(text_runs)
                 if not text.strip(): continue
-                self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, f"Slide {i+1}")
+                self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, department, f"Slide {i+1}")
             self.conn.commit()
         except Exception as e:
             logger.error(f"Pptx processing failed for {file_path}: {e}")
             raise e
 
-    def _process_url(self, url, master_id, routing_table_name, sectors):
+    def _process_url(self, url, master_id, routing_table_name, sectors, department):
         try:
             resp = requests.get(url, timeout=10)
             resp.raise_for_status()
@@ -304,15 +307,28 @@ class DataIngester:
             for script in soup(["script", "style"]):
                 script.decompose()
             text = soup.get_text(separator=' ', strip=True)
-            self._upsert_text_chunks(text, url, master_id, routing_table_name, sectors, "Web Content")
+            self._upsert_text_chunks(text, url, master_id, routing_table_name, sectors, department, "Web Content")
             self.conn.commit()
         except Exception as e:
             logger.error(f"URL processing failed for {url}: {e}")
             raise e
     
+    def _process_md(self, file_path, master_id, routing_table_name, sectors, department):
+        """Process Markdown files by reading as plain text."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+            if not text.strip():
+                logger.warning(f"Skipping empty MD file: {file_path}")
+                return
+            self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, department, "Markdown Content")
+            self.conn.commit()
+        except Exception as e:
+            logger.error(f"MD processing failed for {file_path}: {e}")
+            raise e
 
 
-    def _process_image(self, file_path, master_id, routing_table_name, sectors):
+    def _process_image(self, file_path, master_id, routing_table_name, sectors, department):
         """
         Uses Google Gemini 2.0 Flash for OCR/Vision to extract text from images.
         """
@@ -321,7 +337,7 @@ class DataIngester:
         if not GOOGLE_API_KEY:
             logger.warning("GOOGLE_API_KEY is missing. Inserting placeholder for image OCR.")
             placeholder_text = "[Image OCR Skipped: Missing GOOGLE_API_KEY]"
-            self._upsert_text_chunks(placeholder_text, file_path, master_id, routing_table_name, sectors, "Image Content (Skipped)")
+            self._upsert_text_chunks(placeholder_text, file_path, master_id, routing_table_name, sectors, department, "Image Content (Skipped)")
             return
 
         try:
@@ -342,14 +358,14 @@ class DataIngester:
                 return
 
             logger.info("OCR Success (Gemini). Upserting text...")
-            self._upsert_text_chunks(text_content, file_path, master_id, routing_table_name, sectors, "Image Content")
+            self._upsert_text_chunks(text_content, file_path, master_id, routing_table_name, sectors, department, "Image Content")
             self.conn.commit()
             
         except Exception as e:
             logger.error(f"Gemini OCR failed for {file_path}: {e}")
             raise e
 
-    def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, title_prefix):
+    def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, department, title_prefix):
         chunks = self._chunk_text(text, 1000)
         for k, chunk in enumerate(chunks):
             embedding = self.embedder.encode(chunk).tolist()
@@ -359,16 +375,17 @@ class DataIngester:
                 "routing_table": routing_table_name,
                 "source": source,
                 "text": chunk,
-                "sectors": sectors
+                "sectors": sectors,
+                "department": department
             }
             self.qdrant.upsert(
                 collection_name=COLLECTION_NAME,
                 points=[PointStruct(id=point_id, vector=embedding, payload=payload)]
             )
             self.cursor.execute(f"""
-                INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, qdrant_source, qdrant_point_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (master_id, f"{title_prefix} Part {k+1}", "Text", sectors, source, point_id))
+                INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, Department, qdrant_source, qdrant_point_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (master_id, f"{title_prefix} Part {k+1}", "Text", sectors, department, source, point_id))
         
         self.conn.commit()
 
@@ -394,7 +411,7 @@ class DataIngester:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest data into Market Intelligence V2 Ecosystem")
     parser.add_argument("--input", required=True, help="Path to file, directory, or URL")
-    parser.add_argument("--type", choices=['excel', 'pdf', 'url', 'docx', 'pptx', 'image', 'auto'], default='auto', help="Type of input data")
+    parser.add_argument("--type", choices=['excel', 'pdf', 'url', 'docx', 'pptx', 'image', 'md', 'auto'], default='auto', help="Type of input data")
     parser.add_argument("--title", help="Title for the dataset")
     parser.add_argument("--sectors", default="General", help="Comma-separated sectors")
     parser.add_argument("--summary", default="", help="Brief summary of the data")
@@ -412,6 +429,7 @@ if __name__ == "__main__":
                 elif ext == '.pdf': f_type = 'pdf'
                 elif ext == '.docx': f_type = 'docx'
                 elif ext == '.pptx': f_type = 'pptx'
+                elif ext == '.md': f_type = 'md'
                 elif ext in ['.png', '.jpg', '.jpeg', '.webp']: f_type = 'image'
                 
                 if f_type:
@@ -433,6 +451,7 @@ if __name__ == "__main__":
             '.pdf': 'pdf', 
             '.docx': 'docx', 
             '.pptx': 'pptx',
+            '.md': 'md',
             '.png': 'image', '.jpg': 'image', '.jpeg': 'image', '.webp': 'image'
         }
         f_type = args.type

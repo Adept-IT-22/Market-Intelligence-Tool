@@ -23,6 +23,7 @@ interface ChatThread {
   loadingStep?: string;
   isTyping?: boolean;
   executionTime?: number;
+  isCached?: boolean;
   attachedFiles?: UploadedFile[];
 }
 
@@ -208,18 +209,106 @@ export class MainSearchComponent implements AfterViewChecked {
       });
   }
 
+  private readonly QUERY_CACHE_KEY = 'mit_query_cache';
+  private readonly CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  private getQueryCache(): Record<string, { response: string; execution_time: number; timestamp: number }> {
+    if (!isPlatformBrowser(this.platformId)) return {};
+    try {
+      const raw = localStorage.getItem(this.QUERY_CACHE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+
+  private setQueryCache(query: string, response: string, executionTime: number) {
+    // Never cache error responses
+    const errorPhrases = ['encountered an error', 'error generating', 'could not reach', '⚠️'];
+    if (errorPhrases.some(p => response.toLowerCase().includes(p.toLowerCase()))) return;
+    if (response.length < 100) return;
+
+    const cache = this.getQueryCache();
+    cache[query.toLowerCase().trim()] = {
+      response,
+      execution_time: executionTime,
+      timestamp: Date.now()
+    };
+
+    // Keep cache size manageable (max 50 entries)
+    const keys = Object.keys(cache);
+    if (keys.length > 50) {
+      const sorted = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
+      sorted.slice(0, keys.length - 50).forEach(k => delete cache[k]);
+    }
+
+    if (!isPlatformBrowser(this.platformId)) return;
+    try { localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache)); } catch { }
+  }
+
+  private getCachedQuery(query: string): { response: string; execution_time: number } | null {
+    const cache = this.getQueryCache();
+    const entry = cache[query.toLowerCase().trim()];
+    if (!entry) return null;
+
+    // Check TTL
+    if (Date.now() - entry.timestamp > this.CACHE_TTL_MS) {
+      delete cache[query.toLowerCase().trim()];
+      if (isPlatformBrowser(this.platformId)) {
+        try { localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache)); } catch { }
+      }
+      return null;
+    }
+
+    return { response: entry.response, execution_time: entry.execution_time };
+  }
+
   private executeQuery(thread: ChatThread, query: string) {
     const sessionId = this.chatService.currentSessionId();
+
+    // --- Check local cache first ---
+    const cached = this.getCachedQuery(query);
+    if (cached) {
+      thread.isLoading = false;
+      thread.isTyping = true;
+      thread.executionTime = 0;
+      thread.isCached = true;
+
+      thread.aiMessage = {
+        content: '',
+        timestamp: new Date()
+      };
+
+      this.typewriteResponse(thread, cached.response);
+
+      // Save to guest history
+      if (sessionId && sessionId < 0) {
+        this.chatService.saveGuestMessage(sessionId, { role: 'user', content: query });
+        this.chatService.saveGuestMessage(sessionId, {
+          role: 'assistant', content: cached.response, execution_time: 0
+        });
+      }
+
+      // Auto-rename
+      if (sessionId && this.threads.length === 1) {
+        const session = this.chatService.sessions().find(s => s.id === sessionId);
+        if (session && session.title === 'New Chat') {
+          const newTitle = query.length > 30 ? query.substring(0, 30) + '...' : query;
+          this.chatService.renameChat(sessionId, newTitle).subscribe();
+        }
+      }
+      return; // Skip server call
+    }
+
+    // --- No cache hit, call server ---
     const payload = {
       query,
       session_id: sessionId
     };
 
     this.http.post(`${environment.apiUrl}/query`, payload, {
-      headers: { 'Authorization': `Bearer ${this.auth.getToken()}` }
+      headers: this.auth.getAuthHeaders()
     })
       .pipe(
-        timeout(120000), // 120 seconds timeout for slow backend processing
+        timeout(120000),
         catchError((err) => {
           if (err.name === 'TimeoutError') {
             return throwError(() => ({ error: { error: 'Request timed out. The system is taking longer than expected. Please try again.' } }));
@@ -232,6 +321,7 @@ export class MainSearchComponent implements AfterViewChecked {
           thread.isLoading = false;
           thread.isTyping = true;
           thread.executionTime = res.execution_time;
+          thread.isCached = res.cached;
 
           thread.aiMessage = {
             content: '',
@@ -239,6 +329,9 @@ export class MainSearchComponent implements AfterViewChecked {
           };
 
           this.typewriteResponse(thread, res.Results);
+
+          // Cache the response locally
+          this.setQueryCache(query, res.Results, res.execution_time);
 
           // For guests, save messages to localStorage
           if (sessionId && sessionId < 0) {
@@ -258,7 +351,6 @@ export class MainSearchComponent implements AfterViewChecked {
             const currentSessions = this.chatService.sessions();
             const session = currentSessions.find(s => s.id === sessionId);
             if (session && session.title === 'New Chat') {
-              // Use a short summary of the result or the query as name
               const newTitle = query.length > 30 ? query.substring(0, 30) + '...' : query;
               this.chatService.renameChat(sessionId, newTitle).subscribe();
             }
