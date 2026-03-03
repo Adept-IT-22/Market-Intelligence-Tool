@@ -12,6 +12,7 @@ services:
       - backend
     networks:
       - app-network
+    restart: always
 
   # --- Backend (Flask + Gunicorn) ---
   backend:
@@ -19,29 +20,33 @@ services:
       context: ./Backend
       dockerfile: Dockerfile
     environment:
-      - QDRANT_HOST=qdrant
+      - QDRANT_HOST=qdrant_official
       - QDRANT_PORT=6333
+      - DATABASE_PATH=/app/DB/market-intelligence.db
       - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
     dns:
       - 8.8.8.8
       - 8.8.4.4
     volumes:
       # Persist the SQLite Database
-      - ./Backend/DB:/app/DB
+      - ./DB:/app/DB
       # Persist Uploads
       - ./Backend/uploads:/app/uploads
-      # Mount Config files (Allow updates without rebuild)
+      # Mount Config files
       - ./Backend/.env:/app/.env
       - ./Backend/service-account.json:/app/service-account.json
     expose:
       - "8000"
+    ports:
+      - "8000:8000"
     depends_on:
-      - qdrant
+      - qdrant_official
     networks:
       - app-network
+    restart: always
 
   # --- Vector Database (Qdrant) ---
-  qdrant:
+  qdrant_official:
     image: qdrant/qdrant:latest
     ports:
       - "6333:6333"
@@ -49,6 +54,7 @@ services:
       - qdrant_storage:/qdrant/storage
     networks:
       - app-network
+    restart: always
 
 networks:
   app-network:
@@ -56,3 +62,4 @@ networks:
 
 volumes:
   qdrant_storage:
+
