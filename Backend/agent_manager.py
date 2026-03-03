@@ -929,9 +929,18 @@ class AgentManager:
         
         with ThreadPoolExecutor(max_workers=2) as executor:
             future_details = executor.submit(self.get_detail_content, selection)
-            future_semantic = executor.submit(self.search_qdrant, top_k=3)
+            future_semantic = executor.submit(self.search_qdrant, top_k=5)
             detail_context = future_details.result()
             semantic_results = future_semantic.result()
+
+        # Suppress semantic noise when hierarchical retrieval is strong
+        is_research_query = len(self.query.split()) > 4
+        hierarchical_success = len(detail_context) > 2000
+        if is_research_query and hierarchical_success:
+            logger.info("[Stream] Strong Hierarchical Context: Suppressing Safety Net noise.")
+            semantic_results = []
+        else:
+            semantic_results = semantic_results[:3]
 
         semantic_context = ""
         for point in semantic_results:
@@ -993,7 +1002,12 @@ User Query: "{self.query}"
 {hierarchical_data}
 {semantic_data}
 
-Provide a detailed response with inline citations and a references list at the bottom.
+IMPORTANT: Synthesize information from ALL provided documents in the search context above.
+Cross-reference data across multiple sources where relevant.
+Provide a detailed, structured response with:
+- Inline citations using [Filename](URI) format for every claim
+- Data from multiple documents where available — do NOT rely on a single source
+- A References section listing all unique sources cited
 """
         
         try:
@@ -1025,7 +1039,12 @@ User Query: "{self.query}"
 {hierarchical_data}
 {semantic_data}
 
-Provide a detailed response with inline citations and a references list at the bottom.
+IMPORTANT: Synthesize information from ALL provided documents in the search context above.
+Cross-reference data across multiple sources where relevant.
+Provide a detailed, structured response with:
+- Inline citations using [Filename](URI) format for every claim
+- Data from multiple documents where available — do NOT rely on a single source
+- A References section listing all unique sources cited
 """
         
         yield from call_gemini_stream_sync(f"{system_prompt}\n\n{user_prompt}")
