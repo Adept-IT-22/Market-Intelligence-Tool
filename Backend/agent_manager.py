@@ -50,12 +50,13 @@ def _build_system_prompt(chat_history=None) -> str:
         "Instructions:\n"
         "1. Prioritize provided context. If the answer is not in the context, say so.\n"
         "2. Keep responses professional, data-driven, and highly structured using clear Markdown.\n"
-        "3. INLINE CITATIONS: When citing sources in the text, use ONLY the markdown link format: [Filename](URI).\n"
+        "3. EXTRACT AND PRESENT DATA: You MUST extract specific facts, metrics, prices, and insights from the documents and include them directly in your response. DO NOT just provide file links or tell the user to read the documents. Actually answer their question using the data.\n"
+        "4. INLINE CITATIONS: When citing sources in the text, use ONLY the markdown link format: [Filename](URI).\n"
         "   - Display text = clean filename only (e.g., 'ProjectSheet.pdf')\n"
         "   - URI = full path from context\n"
         "   - DO NOT add the path in parentheses after the link\n"
         "   - Example: ...mentioned in [Report.pdf](C:\\path\\to\\Report.pdf)\n"
-        "4. REFERENCES SECTION: At the end, list unique sources under a 'References' header.\n"
+        "5. REFERENCES SECTION: At the end, list unique sources under a 'References' header.\n"
         "   - Format: Bullet point + markdown link ONLY\n"
         "   - Example: • [ProjectSheet.pdf](C:\\full\\path\\to\\file.pdf)\n"
     )
@@ -1005,6 +1006,7 @@ User Query: "{self.query}"
 IMPORTANT: Synthesize information from ALL provided documents in the search context above.
 Cross-reference data across multiple sources where relevant.
 Provide a detailed, structured response with:
+- Specific data points, numbers, actual text, and facts extracted from the documents. Do not tell the user to read the files, read them yourself and summarize the answers.
 - Inline citations using [Filename](URI) format for every claim
 - Data from multiple documents where available — do NOT rely on a single source
 - A References section listing all unique sources cited
@@ -1042,6 +1044,7 @@ User Query: "{self.query}"
 IMPORTANT: Synthesize information from ALL provided documents in the search context above.
 Cross-reference data across multiple sources where relevant.
 Provide a detailed, structured response with:
+- Specific data points, numbers, actual text, and facts extracted from the documents. Do not tell the user to read the files, read them yourself and summarize the answers.
 - Inline citations using [Filename](URI) format for every claim
 - Data from multiple documents where available — do NOT rely on a single source
 - A References section listing all unique sources cited
