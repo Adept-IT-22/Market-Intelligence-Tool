@@ -24,19 +24,12 @@ export interface ChatMessage {
 })
 export class ChatService {
     private readonly SESSION_KEY = 'mit_current_session_id';
-    private readonly GUEST_SESSIONS_KEY = 'mit_guest_sessions';
-    private readonly GUEST_MESSAGES_KEY = 'mit_guest_messages_prefix_';
+
 
     sessions = signal<ChatSession[]>([]);
     currentSessionId = signal<number | null>(null);
 
     constructor(private http: HttpClient, private auth: AuthService) {
-        // Restore current session from storage if it exists
-        const savedSession = localStorage.getItem(this.SESSION_KEY);
-        if (savedSession) {
-            this.currentSessionId.set(parseInt(savedSession, 10));
-        }
-
         // Automatically load sessions
         effect(() => {
             if (this.auth.isAuthenticated()) {
@@ -45,30 +38,11 @@ export class ChatService {
                 this.loadGuestSessions();
             }
         });
-
-        // Persist current session ID when it changes
-        effect(() => {
-            const id = this.currentSessionId();
-            if (id) {
-                localStorage.setItem(this.SESSION_KEY, id.toString());
-            } else {
-                localStorage.removeItem(this.SESSION_KEY);
-            }
-        });
     }
 
     private loadGuestSessions() {
-        const saved = localStorage.getItem(this.GUEST_SESSIONS_KEY);
-        const guestSessions = saved ? JSON.parse(saved) : [];
-        this.sessions.set(guestSessions);
-
-        // If current session is a guest session, keep it, otherwise clear
-        const currentId = this.currentSessionId();
-        if (currentId && !guestSessions.find((s: ChatSession) => s.id === currentId)) {
-            // Check if it's a guest ID (usually negative or high random)
-            // For now, if it's not in the guest sessions list, clear it
-            this.currentSessionId.set(null);
-        }
+        this.sessions.set([]);
+        this.currentSessionId.set(null);
     }
 
     private getHeaders() {
@@ -134,14 +108,12 @@ export class ChatService {
         const sortedSessions = [...sessions].sort((a, b) =>
             new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
         );
-        localStorage.setItem(this.GUEST_SESSIONS_KEY, JSON.stringify(sortedSessions));
         this.sessions.set(sortedSessions);
     }
 
     getChatDetails(sessionId: number): Observable<any> {
         if (!this.auth.isAuthenticated() || sessionId < 0) {
-            const saved = localStorage.getItem(this.GUEST_MESSAGES_KEY + sessionId);
-            const messages = saved ? JSON.parse(saved) : [];
+            const messages: ChatMessage[] = []; // Guest messages are not persisted
             const session = this.sessions().find(s => s.id === sessionId);
 
             this.currentSessionId.set(sessionId);
@@ -157,10 +129,7 @@ export class ChatService {
 
     saveGuestMessage(sessionId: number, message: ChatMessage) {
         if (sessionId >= 0) return; // Only for guest sessions
-
-        const saved = localStorage.getItem(this.GUEST_MESSAGES_KEY + sessionId);
-        const messages = saved ? JSON.parse(saved) : [];
-
+        // No longer saving to localStorage
         const now = new Date();
         const nowStr = now.getFullYear() + '-' +
             String(now.getMonth() + 1).padStart(2, '0') + '-' +
@@ -169,11 +138,13 @@ export class ChatService {
             String(now.getMinutes()).padStart(2, '0') + ':' +
             String(now.getSeconds()).padStart(2, '0');
 
+        // Message is now only added to internal state via MainSearchComponent threads or in-memory lists if needed
+        const messages: ChatMessage[] = []; // In-memory fallback if history needs to be maintained in-session
+
         messages.push({
             ...message,
             created_at: nowStr
         });
-        localStorage.setItem(this.GUEST_MESSAGES_KEY + sessionId, JSON.stringify(messages));
 
         // Also update the session's updated_at timestamp in the sessions list
         const guestSessions = this.sessions().map(s =>
@@ -210,7 +181,6 @@ export class ChatService {
         if (!this.auth.isAuthenticated() || sessionId < 0) {
             const guestSessions = this.sessions().filter(s => s.id !== sessionId);
             this.saveGuestSessions(guestSessions);
-            localStorage.removeItem(this.GUEST_MESSAGES_KEY + sessionId);
             if (this.currentSessionId() === sessionId) {
                 this.currentSessionId.set(null);
             }
