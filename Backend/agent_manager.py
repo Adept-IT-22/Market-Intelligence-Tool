@@ -55,7 +55,8 @@ def _build_system_prompt(chat_history=None) -> str:
         "   - Display text = clean filename ONLY (e.g., 'MarketReport.pdf'). NEVER use internal table names like 'route_...' or 'detail_...'.\n"
         "   - URI = The full local path provided in the context.\n"
         "   - Example: ...as seen in [ProjectSheet.pdf](C:\\shared\\ProjectSheet.pdf).\n"
-        "5. SOURCES ANALYZED SECTION: At the VERY END of your response, you MUST include a 'Sources Analyzed' section.\n"
+        "5. SOURCES ANALYZED SECTION: At the VERY END of your response, include a 'Sources Analyzed' section for the sources actually present in the context.\n"
+        "   - If no sources were retrieved, explicitly say that no supporting documents were available.\n"
         "   - List EVERY document that was provided in the context, even if you did not quote it directly.\n"
         "   - This ensures the user can access all relevant documents independently.\n"
         "   - Format: Bullet point + markdown link ONLY.\n"
@@ -634,9 +635,9 @@ class AgentManager:
                 return None
             try:
                 # Limit rows to 100 to prevent massive context if we have many tables
-                conn_inner = sqlite3.connect(self.database_path, check_same_thread=False)
-                df = pd.read_sql_query(f"SELECT * FROM {r_table} LIMIT 80", conn_inner)
-                conn_inner.close()
+                with sqlite3.connect(self.database_path, check_same_thread=False) as conn_inner:
+                    df = pd.read_sql_query(f"SELECT * FROM {r_table} LIMIT 80", conn_inner)
+       
                 return f"\n--- Source: {r_table} ---\n{df.to_string(index=False)}\n"
             except Exception as e:
                 logger.warning(f"Could not read routing table {r_table}: {e}")
@@ -1007,9 +1008,9 @@ IMPORTANT: Synthesize information from ALL provided documents in the search cont
 Cross-reference data across multiple sources where relevant.
 Provide a detailed, structured response with:
 - Specific data points, numbers, actual text, and facts extracted from the documents. Do not tell the user to read the files, read them yourself and summarize the answers.
-- Inline citations using [Filename](URI) format for every claim.
-- Data from multiple documents where available — do NOT rely on a single source.
-- A 'Sources Analyzed' section listing EVERY unique source provided in the context, even those not directly cited.
+- Inline citations using [Filename](URI) format only for claims supported by retrieved context.
+- If multiple independent documents are available, cross-reference them. If only one source is available, answer from it and state that corroboration was not available.
+- A 'Sources Analyzed' section listing every unique source actually present in the context. If none were retrieved, say so instead of inventing citations.
 """
         
         try:
