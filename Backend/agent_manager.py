@@ -52,13 +52,18 @@ def _build_system_prompt(chat_history=None) -> str:
         "2. Keep responses professional, data-driven, and highly structured using clear Markdown.\n"
         "3. EXTRACT AND PRESENT DATA: You MUST extract specific facts, metrics, prices, and insights from the documents and include them directly in your response. DO NOT just provide file links or tell the user to read the documents. Actually answer their question using the data.\n"
         "4. INLINE CITATIONS: When citing sources in the text, use ONLY the markdown link format: [Filename](URI).\n"
-        "   - Display text = clean filename only (e.g., 'ProjectSheet.pdf')\n"
-        "   - URI = full path from context\n"
-        "   - DO NOT add the path in parentheses after the link\n"
-        "   - Example: ...mentioned in [Report.pdf](C:\\path\\to\\Report.pdf)\n"
-        "5. REFERENCES SECTION: At the end, list unique sources under a 'References' header.\n"
-        "   - Format: Bullet point + markdown link ONLY\n"
-        "   - Example: • [ProjectSheet.pdf](C:\\full\\path\\to\\file.pdf)\n"
+        "   - Display text = clean filename ONLY (e.g., 'MarketReport.pdf'). NEVER use internal table names like 'route_...' or 'detail_...'.\n"
+        "   - URI = The full local path provided in the context.\n"
+        "   - Example: ...as seen in [ProjectSheet.pdf](C:\\shared\\ProjectSheet.pdf).\n"
+        "5. SOURCES ANALYZED SECTION: At the VERY END of your response, include a 'Sources Analyzed' section for the sources actually present in the context.\n"
+        "   - If no sources were retrieved, explicitly say that no supporting documents were available.\n"
+        "   - List EVERY document that was provided in the context, even if you did not quote it directly.\n"
+        "   - This ensures the user can access all relevant documents independently.\n"
+        "   - Format: Bullet point + markdown link ONLY.\n"
+        "   - Example:\n"
+        "     ## Sources Analyzed\n"
+        "     - [Report1.pdf](C:\\path\\to\\Report1.pdf)\n"
+        "     - [Data.xlsx](C:\\path\\to\\Data.xlsx)\n"
     )
     if chat_history:
         # Take last 6 messages to avoid context overflow but maintain continuity
@@ -625,34 +630,30 @@ class AgentManager:
         max_total_chars = 15000 # Reduced from 20000 to avoid Groq 6000 token limit
         current_length = 0
         
-        for r_table in routing_tables:
-            # Basic validation to prevent injection if list comes from untrusted source
+        def read_routing_table(r_table):
             if not r_table.isidentifier():
-                 logger.warning(f"Skipping invalid table name: {r_table}")
-                 continue
-
-            if current_length >= max_total_chars:
-                logger.warning("Routing data budget exceeded. Skipping remaining tables.")
-                break
-
+                return None
             try:
-                # Limit rows to 50 to prevent massive context
-                df = pd.read_sql_query(f"SELECT * FROM {r_table} LIMIT 50", conn)
-                section_text = f"\n--- Source: {r_table} ---\n{df.to_string(index=False)}\n"
-                
-                if current_length + len(section_text) > max_total_chars:
-                    # Truncate
-                    allowed = max_total_chars - current_length
-                    section_text = section_text[:allowed] + "\n...[TRUNCATED]..."
-                    combined_routing_sections.append(section_text)
-                    current_length += allowed
-                    break
-                
-                combined_routing_sections.append(section_text)
-                current_length += len(section_text)
-                
+                # Limit rows to 100 to prevent massive context if we have many tables
+                with sqlite3.connect(self.database_path, check_same_thread=False) as conn_inner:
+                    df = pd.read_sql_query(f"SELECT * FROM {r_table} LIMIT 80", conn_inner)
+       
+                return f"\n--- Source: {r_table} ---\n{df.to_string(index=False)}\n"
             except Exception as e:
                 logger.warning(f"Could not read routing table {r_table}: {e}")
+                return None
+
+        with ThreadPoolExecutor(max_workers=min(len(routing_tables), 8)) as executor:
+            results = list(executor.map(read_routing_table, routing_tables))
+        
+        for section_text in results:
+            if not section_text: continue
+            if current_length + len(section_text) > max_total_chars:
+                allowed = max_total_chars - current_length
+                combined_routing_sections.append(section_text[:allowed] + "\n...[TRUNCATED]...")
+                break
+            combined_routing_sections.append(section_text)
+            current_length += len(section_text)
         conn.close()
 
         combined_routing_data = "".join(combined_routing_sections)
@@ -1007,9 +1008,9 @@ IMPORTANT: Synthesize information from ALL provided documents in the search cont
 Cross-reference data across multiple sources where relevant.
 Provide a detailed, structured response with:
 - Specific data points, numbers, actual text, and facts extracted from the documents. Do not tell the user to read the files, read them yourself and summarize the answers.
-- Inline citations using [Filename](URI) format for every claim
-- Data from multiple documents where available — do NOT rely on a single source
-- A References section listing all unique sources cited
+- Inline citations using [Filename](URI) format only for claims supported by retrieved context.
+- If multiple independent documents are available, cross-reference them. If only one source is available, answer from it and state that corroboration was not available.
+- A 'Sources Analyzed' section listing every unique source actually present in the context. If none were retrieved, say so instead of inventing citations.
 """
         
         try:
@@ -1045,9 +1046,9 @@ IMPORTANT: Synthesize information from ALL provided documents in the search cont
 Cross-reference data across multiple sources where relevant.
 Provide a detailed, structured response with:
 - Specific data points, numbers, actual text, and facts extracted from the documents. Do not tell the user to read the files, read them yourself and summarize the answers.
-- Inline citations using [Filename](URI) format for every claim
-- Data from multiple documents where available — do NOT rely on a single source
-- A References section listing all unique sources cited
+- Inline citations using [Filename](URI) format for every claim.
+- Data from multiple documents where available — do NOT rely on a single source.
+- A 'Sources Analyzed' section listing EVERY unique source provided in the context, even those not directly cited.
 """
         
         yield from call_gemini_stream_sync(f"{system_prompt}\n\n{user_prompt}")
