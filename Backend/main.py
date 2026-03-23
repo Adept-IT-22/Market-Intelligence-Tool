@@ -402,37 +402,38 @@ def upload_file():
             f.write(content)
         logger.info(f"File uploaded: {unique_filename} ({file_size / 1024:.1f} KB) -> Dept: {department}")
         
-        # --- Trigger Automatic Ingestion ---
-        try:
-            from ingest_data import DataIngester
-            logger.info(f"Auto-ingesting file: {unique_filename} for {department}")
-            ingester = DataIngester()
-            
-            # Determine type
-            ext = clean_filename.rsplit('.', 1)[1].lower() if '.' in clean_filename else 'pdf'
-            type_map = {
-                'xlsx': 'excel', 'xls': 'excel', 
-                'pdf': 'pdf', 'docx': 'docx', 'pptx': 'pptx',
-                'txt': 'pdf', 'csv': 'excel', 'md': 'pdf',
-                'png': 'image', 'jpg': 'image', 'jpeg': 'image', 'webp': 'image'
-            }
-            f_type = type_map.get(ext, 'pdf')
-            
-            # Process
-            ingester.process_input(
-                input_path=file_path,
-                source_type=f_type,
-                title=filename,
-                sectors="General", 
-                summary="Automated Upload via API/SharePoint",
-                department=department
-            )
-            logger.info("Auto-ingestion successful.")
-            
-        except Exception as ingest_err:
-             logger.error(f"Auto-ingestion failed: {ingest_err}")
-             # We don't return 500 here because the file WAS uploaded, just not indexed.
-             # You might want to include a warning in the response.
+        # --- Trigger Automatic Ingestion in Background ---
+        def run_ingestion_task(task_file_path, task_f_type, task_filename, task_department):
+            try:
+                from ingest_data import DataIngester
+                logger.info(f"Background Ingestion Started: {task_filename} for {task_department}")
+                ingester = DataIngester()
+                ingester.process_input(
+                    input_path=task_file_path,
+                    source_type=task_f_type,
+                    title=task_filename,
+                    sectors="General",
+                    summary="Automated Upload via API/SharePoint",
+                    department=task_department
+                )
+                logger.info(f"Background Ingestion Successful: {task_filename}")
+            except Exception as ingest_err:
+                logger.error(f"Background Ingestion Failed for {task_filename}: {ingest_err}")
+
+        # Determine type
+        ext = clean_filename.rsplit('.', 1)[1].lower() if '.' in clean_filename else 'pdf'
+        type_map = {
+            'xlsx': 'excel', 'xls': 'excel', 
+            'pdf': 'pdf', 'docx': 'docx', 'pptx': 'pptx',
+            'txt': 'pdf', 'csv': 'excel', 'md': 'pdf',
+            'png': 'image', 'jpg': 'image', 'jpeg': 'image', 'webp': 'image'
+        }
+        f_type = type_map.get(ext, 'pdf')
+
+        import threading
+        thread = threading.Thread(target=run_ingestion_task, args=(file_path, f_type, filename, department))
+        thread.start()
+        logger.info(f"Auto-ingestion queued for {unique_filename}")
 
         duration = time.perf_counter() - start_time
         return {

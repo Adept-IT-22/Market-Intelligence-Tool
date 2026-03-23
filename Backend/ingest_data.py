@@ -17,8 +17,19 @@ from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
 from groq import Groq # Keep for legacy/future
-import google.generativeai as genai
-from PIL import Image
+# Vision / OCR Imports (Optional)
+try:
+    import google.generativeai as genai
+    from PIL import Image
+    HAS_VISION = True
+except ImportError:
+    HAS_VISION = False
+    class genai:
+        @staticmethod
+        def configure(**kwargs): pass
+    class Image:
+        @staticmethod
+        def open(path): return None
 
 load_dotenv()
 
@@ -330,40 +341,10 @@ class DataIngester:
 
     def _process_image(self, file_path, master_id, routing_table_name, sectors, department):
         """
-        Uses Google Gemini 2.0 Flash for OCR/Vision to extract text from images.
+        OCR/Vision is currently DISABLED as per user request.
         """
-        logger.info(f"Processing image with Gemini: {file_path}")
-        
-        if not GOOGLE_API_KEY:
-            logger.warning("GOOGLE_API_KEY is missing. Inserting placeholder for image OCR.")
-            placeholder_text = "[Image OCR Skipped: Missing GOOGLE_API_KEY]"
-            self._upsert_text_chunks(placeholder_text, file_path, master_id, routing_table_name, sectors, department, "Image Content (Skipped)")
-            return
-
-        try:
-            model = genai.GenerativeModel('gemini-2.0-flash')
-            
-            # Load image using PIL
-            image_file = Image.open(file_path)
-            
-            response = model.generate_content([
-                "Transcribe the text in this image perfectly. Output ONLY the text content. If it's a chart or diagram, describe the key data points in detail.", 
-                image_file
-            ])
-            
-            text_content = response.text
-            
-            if not text_content or not text_content.strip():
-                logger.warning(f"No text extracted from image: {file_path}")
-                return
-
-            logger.info("OCR Success (Gemini). Upserting text...")
-            self._upsert_text_chunks(text_content, file_path, master_id, routing_table_name, sectors, department, "Image Content")
-            self.conn.commit()
-            
-        except Exception as e:
-            logger.error(f"Gemini OCR failed for {file_path}: {e}")
-            raise e
+        logger.info(f"Image OCR is currently DISABLED. Skipping content extraction for: {file_path}")
+        return
 
     def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, department, title_prefix):
         chunks = self._chunk_text(text, 1000)

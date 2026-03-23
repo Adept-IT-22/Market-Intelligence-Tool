@@ -23,6 +23,7 @@ interface ChatThread {
   loadingStep?: string;
   isTyping?: boolean;
   executionTime?: number;
+  thinkingTime?: number;
   isCached?: boolean;
   attachedFiles?: UploadedFile[];
   isCachedResult?: boolean;
@@ -272,6 +273,8 @@ export class MainSearchComponent implements AfterViewChecked {
         thread.isTyping = true;
         let fullResponse = '';
         let buffer = '';
+        const startTime = Date.now();
+        let firstChunkReceived = false;
 
         const decoder = new TextDecoder();
         while (true) {
@@ -288,16 +291,23 @@ export class MainSearchComponent implements AfterViewChecked {
               try {
                 const data = JSON.parse(trimmedLine.substring(6));
                 if (data.chunk) {
+                  if (!firstChunkReceived) {
+                    thread.thinkingTime = Number(((Date.now() - startTime) / 1000).toFixed(1));
+                    firstChunkReceived = true;
+                  }
                   fullResponse += data.chunk;
-                  // Update UI in real-time
+                  // Update UI in real-time (isFinal = false to avoid deleting text during stream)
                   if (thread.aiMessage) {
-                    thread.aiMessage.content = this.transformReferences(fullResponse);
+                    thread.aiMessage.content = this.transformReferences(fullResponse, false);
                   }
                   this.scrollToBottom();
                 } else if (data.done) {
                   thread.executionTime = data.execution_time;
                   thread.isTyping = false;
-
+                  // Final high-quality cleanup of the message
+                  if (thread.aiMessage) {
+                    thread.aiMessage.content = this.transformReferences(fullResponse, true);
+                  }
                 }
               } catch (e) {
                 console.warn('Error parsing SSE chunk', e);
@@ -448,16 +458,16 @@ export class MainSearchComponent implements AfterViewChecked {
   /**
    * Transforms file references to SharePoint URLs.
    * Converts local paths to clickable SharePoint links while keeping clean filenames.
-   * Format: [filename.pdf](C:\...) becomes [filename.pdf](https://sharepoint.com/...)
+   * isFinal: if true, performs more aggressive deduplication and cleanup.
    */
-  private transformReferences(text: string): string {
+  private transformReferences(text: string, isFinal: boolean = false): string {
     let result = text;
 
     // Common base path for all Adept folders
     const localUserBase = 'C:\\Users\\imain\\Adept Technologies Ltd\\';
     const localUserBaseAlt = 'C:/Users/imain/Adept Technologies Ltd/';
 
-    // SharePoint mappings for different folders
+    // SharePoint mappings
     const sharePointMappings: { [key: string]: string } = {
       '30. Cloud & Business Automation - Documents': 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents',
       '03. Marketing - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/03.%20Marketing%20-%20General',
@@ -465,105 +475,80 @@ export class MainSearchComponent implements AfterViewChecked {
       'Innovations - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/Innovations%20-%20General'
     };
 
-    // Helper to extract just the filename from a full path
     const extractFilename = (path: string): string => {
       const parts = path.replace(/\\/g, '/').split('/');
       return parts[parts.length - 1] || path;
     };
 
-    // Helper to check if a path is a local Windows path
     const isLocalPath = (path: string): boolean => {
-      return path.includes('\\') ||
-        path.startsWith('C:') ||
-        path.startsWith('D:') ||
-        path.includes('/Users/') ||
-        path.includes('\\Users\\');
+      return path.includes('\\') || path.startsWith('C:') || path.startsWith('D:') ||
+             path.includes('/Users/') || path.includes('\\Users\\');
     };
 
-    // Helper to convert local path to SharePoint URL
     const toSharePointUrl = (localPath: string): string => {
-      // Normalize path
       let normalizedPath = localPath.replace(/\\/g, '/');
-
-      // Remove the base user path
       normalizedPath = normalizedPath
         .replace(localUserBase.replace(/\\/g, '/'), '')
         .replace(localUserBaseAlt, '');
 
-      // Find which SharePoint folder this belongs to
       for (const [folderName, sharePointBase] of Object.entries(sharePointMappings)) {
         if (normalizedPath.startsWith(folderName)) {
-          // Extract the relative path after the folder name
           const relativePath = normalizedPath.substring(folderName.length).replace(/^\//, '');
-
-          if (!relativePath) {
-            return sharePointBase;
-          }
-
-          // Encode each segment
-          const encodedPath = relativePath
-            .split('/')
-            .map((segment: string) => encodeURIComponent(segment))
-            .join('/');
-
+          if (!relativePath) return sharePointBase;
+          const encodedPath = relativePath.split('/').map(s => encodeURIComponent(s)).join('/');
           return `${sharePointBase}/${encodedPath}`;
         }
       }
-
-      // Fallback: no mapping found; avoid exposing local paths
-      console.warn('No SharePoint mapping found for local path:', localPath);
-      return '#'; // Return placeholder to prevent path exposure
+      return '#';
     };
 
-    // Pass 1: Handle [Source: filename | Link: path] format
+    // Pass 1: Handle [Source: filename | Link: path] format (often used by AgentManager)
     result = result.replace(/\[Source:\s*([^|]+)\s*\|\s*Link:\s*([^\]]+)\]/g, (match, filename, localPath) => {
       const trimmedFilename = filename.trim();
       const cleanPath = localPath.trim();
-
-      // Fix "route_" or internal names appearing as filename
       const displayFilename = (trimmedFilename.startsWith('route_') || trimmedFilename.startsWith('detail_'))
-        ? extractFilename(cleanPath)
-        : trimmedFilename;
+        ? extractFilename(cleanPath) : trimmedFilename;
 
       if (isLocalPath(cleanPath)) {
-        const sharePointUrl = toSharePointUrl(cleanPath);
-        return `[${displayFilename}](${sharePointUrl})`;
+        return `[${displayFilename}](${toSharePointUrl(cleanPath)})`;
       }
       return `[${displayFilename}](${cleanPath})`;
     });
 
-    // Pass 2: Remove duplicate filename that appears before the markdown link
-    result = result.replace(/([^\[\]]+?)\s+\[([^\]]+)\]\(/g, (match, before, inBrackets) => {
-      const trimmedBefore = before.trim();
-      const trimmedInBrackets = inBrackets.trim();
-      if (trimmedBefore === trimmedInBrackets || (trimmedInBrackets.startsWith('route_') && trimmedBefore)) {
-        return `[${trimmedInBrackets === 'route_*' ? trimmedBefore : trimmedInBrackets}](`;
-      }
-      return match;
-    });
+    // Pass 2: DEDUPLICATION (The cause of the "typing and deleting" glitch)
+    // We only do this if isFinal is true, or if we are sure we have a complete link.
+    if (isFinal) {
+      result = result.replace(/([^\[\]\n]+?)\s+\[([^\]]+)\]\(([^)]+)\)/g, (match, before, inBrackets, url) => {
+        const trimmedBefore = before.trim();
+        const trimmedInBrackets = inBrackets.trim();
+        // If the text before the link is the same as the link label, remove the text before.
+        if (trimmedBefore === trimmedInBrackets || (trimmedInBrackets.startsWith('route_') && trimmedBefore)) {
+          return `[${trimmedInBrackets.startsWith('route_') ? trimmedBefore : trimmedInBrackets}](${url})`;
+        }
+        return match;
+      });
+    }
 
     // Pass 3: Convert markdown links with local paths to SharePoint URLs
     result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, path) => {
-      const cleanFilename = (filename.startsWith('route_') || filename.startsWith('detail_'))
-        ? extractFilename(path)
-        : filename;
-
       if (isLocalPath(path)) {
-        const sharePointUrl = toSharePointUrl(path);
-        return `[${cleanFilename}](${sharePointUrl})`;
+        const cleanFilename = (filename.startsWith('route_') || filename.startsWith('detail_'))
+          ? extractFilename(path) : filename;
+        return `[${cleanFilename}](${toSharePointUrl(path)})`;
       }
-      // Keep web URLs as-is
       return match;
     });
 
-    // Pass 4: Clean up any remaining raw Windows-style paths in the text (convert to bold filenames)
-    result = result.replace(/[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*/g, (match) => {
-      const filename = extractFilename(match);
-      return `**${filename}**`;
-    });
+    // Pass 4: Raw Windows paths in text (Only clean up in final pass to avoid partial path corruption)
+    if (isFinal) {
+      result = result.replace(/[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*/g, (match) => {
+        return `**${extractFilename(match)}**`;
+      });
+    }
 
     return result;
   }
+
 
   private typewriteResponse(thread: ChatThread, fullText: string) {
     // Transform the text to clean up file references

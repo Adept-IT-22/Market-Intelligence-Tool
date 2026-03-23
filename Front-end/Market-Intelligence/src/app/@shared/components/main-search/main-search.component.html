@@ -120,14 +120,16 @@
                         <span *ngIf="thread.isTyping" class="cursor">|</span>
 
                         <!-- Response Footer -->
-                        <div class="response-footer" *ngIf="!thread.isTyping">
+                        <div class="response-footer">
                             <span class="cached-badge" *ngIf="thread.isCachedResult">
                                 <mat-icon>history</mat-icon> Cached
                             </span>
-                            <span class="time-taken" *ngIf="thread.executionTime !== undefined">
-                                <mat-icon>timer</mat-icon> {{ thread.executionTime }}s
+                            <span class="time-taken" *ngIf="thread.thinkingTime || thread.executionTime">
+                                <mat-icon>timer</mat-icon>
+                                <span *ngIf="thread.thinkingTime">Thought {{ thread.thinkingTime }}s</span>
+                                <span *ngIf="thread.executionTime"> • Search took {{ thread.executionTime }}s</span>
                             </span>
-                            <div class="actions">
+                            <div class="actions" *ngIf="!thread.isTyping">
                                 <button class="action-btn" (click)="copyResponse(thread.aiMessage.content)"
                                     title="Copy Response">
                                     <mat-icon>content_copy</mat-icon>

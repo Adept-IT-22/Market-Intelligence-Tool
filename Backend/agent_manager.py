@@ -567,8 +567,8 @@ class AgentManager:
         system_prompt = (
             "You are a Senior Strategic Researcher. "
             "Review the available data sources and select the TOP 8 tables most relevant to the query. "
-            "CRITICAL: Many 'Summary' fields are generic marketing text. ALWAYS prioritize the 'Title' as it contains the actual document name and true topic. "
-            "If a Title suggests relevance to Kenya, Economics, Agriculture, or Industry, SELECT the table even if the summary says 'marketing'. "
+            "CRITICAL: If the query asks for a CORRELATION between two contexts (e.g., 'Market trends' vs 'Adept projects'), you MUST select at least 3 tables from EACH context to allow the final layer to connect them. "
+            "ALWAYS prioritize the 'Title' as it contains the true topic. Many 'Summary' fields of Adept internal docs are generic marketing text—do not let that deter you from selecting them if the Title matches the query. "
             "Prioritize sources with '[HIGH CONFIDENCE]' if they match the query keywords. "
             "Return a COMMA-SEPARATED list of 'table_name' strings only."
         )
@@ -668,6 +668,8 @@ class AgentManager:
             "You are a Precision Data Scout. "
             "Review the specific entries from the selected sources (Routing Tables). "
             "Identify the specific 'table_name' (for SQL/Excel) or 'qdrant_point_id' (for Text) that contain the answer. "
+            "CRITICAL: If the user is asking about company projects, PRIORITIZE internal sources even if they only contain page/part references. "
+            "If the query requires connecting two topics (Market vs Internal), ensure you select the BEST identifiers for BOTH topics."
             "Return a JSON object with two keys: 'sql_tables' (list of strings) and 'qdrant_ids' (list of strings)."
         )
         
@@ -972,9 +974,13 @@ class AgentManager:
         is_fast_path = context_dict.get("Is Fast Path", False)
         
         if is_fast_path:
-             # Fast-path prompt for greetings
-             system_prompt = _build_system_prompt() # No history needed for simple greeting
-             prompt = f"{system_prompt}\n\nThe user said: '{self.query}'. Reply politely and professionally as the Adept Market Intelligence Assistant. Mention that you are ready to help with market research or document analysis."
+             # Fast-path prompt for greetings - OMIT source instructions
+             prompt = (
+                 "You are the Adept Market Intelligence Assistant. "
+                 f"The user said: '{self.query}'. Reply politely and professionally. "
+                 "Mention that you are ready to help with market research, document analysis, or innovation insights. "
+                 "DO NOT include a 'Sources Analyzed' section."
+             )
              try:
                  content = call_gemini_sync(prompt)
                  return content
@@ -1031,7 +1037,12 @@ Provide a detailed, structured response with:
         system_prompt = _build_system_prompt(self.chat_history)
 
         if is_fast_path:
-             prompt = f"{system_prompt}\n\nThe user said: '{self.query}'. Reply politely and professionally as the Adept Market Intelligence Assistant. Mention that you are ready to help with market research or document analysis."
+             prompt = (
+                 "You are the Adept Market Intelligence Assistant. "
+                 f"The user said: '{self.query}'. Reply politely and professionally. "
+                 "Mention that you are ready to help with market research, document analysis, or innovation insights. "
+                 "DO NOT include a 'Sources Analyzed' section."
+             )
              yield from call_gemini_stream_sync(prompt)
              return
 
