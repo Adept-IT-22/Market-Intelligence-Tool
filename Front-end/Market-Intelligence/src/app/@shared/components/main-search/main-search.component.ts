@@ -64,8 +64,30 @@ export class MainSearchComponent implements AfterViewChecked {
     "Analyzing your request...",
     "Scanning market databases...",
     "Retrieving vector context...",
-    "Synthesizing insights..."
+    "Synthesizing insights...",
+    "Consulting Adept R&D archives...",
+    "Processing economic indicators...",
+    "Mapping industry trends...",
+    "Validating data points..."
   ];
+
+  private contextLoadingSteps: { [key: string]: string[] } = {
+    adept: [
+      "Accessing Adept project database...",
+      "Retrieving innovation timelines...",
+      "Analyzing system architecture..."
+    ],
+    market: [
+      "Scanning Kenyan market sectors...",
+      "Evaluating economic sentiment...",
+      "Filtering financial data..."
+    ],
+    innovation: [
+      "Researching internal IPs...",
+      "Synthesizing breakthrough insights...",
+      "Reviewing R&D collateral..."
+    ]
+  };
 
   // Onboarding modal
   showOnboarding: boolean = false;
@@ -165,7 +187,7 @@ export class MainSearchComponent implements AfterViewChecked {
       this.fileInput.nativeElement.value = '';
     }
 
-    this.cycleLoadingSteps(newThread);
+    this.cycleLoadingSteps(newThread, queryText);
 
     const sessionId = this.chatService.currentSessionId();
     if (sessionId) {
@@ -210,102 +232,12 @@ export class MainSearchComponent implements AfterViewChecked {
       });
   }
 
-  private readonly QUERY_CACHE_KEY = 'mit_query_cache';
-  private readonly CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-  private getQueryCache(): Record<string, { response: string; execution_time: number; timestamp: number }> {
-    if (!isPlatformBrowser(this.platformId)) return {};
-    try {
-      const raw = localStorage.getItem(this.QUERY_CACHE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch { return {}; }
-  }
 
-  private setQueryCache(query: string, response: string, executionTime: number) {
-    // Never cache error responses
-    const errorPhrases = ['encountered an error', 'error generating', 'could not reach', '⚠️'];
-    if (errorPhrases.some(p => response.toLowerCase().includes(p.toLowerCase()))) return;
-    if (response.length < 100) return;
 
-    const cache = this.getQueryCache();
-    const normalizedKey = query.toLowerCase().trim().replace(/[?.,!]$/, "");
-    cache[normalizedKey] = {
-      response,
-      execution_time: executionTime,
-      timestamp: Date.now()
-    };
-
-    // Keep cache size manageable (max 50 entries)
-    const keys = Object.keys(cache);
-    if (keys.length > 50) {
-      const sorted = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
-      sorted.slice(0, keys.length - 50).forEach(k => delete cache[k]);
-    }
-
-    try {
-      if (isPlatformBrowser(this.platformId)) {
-        localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache));
-      }
-    } catch { }
-  }
-
-  private getCachedQuery(query: string): { response: string; execution_time: number } | null {
-    const cache = this.getQueryCache();
-    const normalizedKey = query.toLowerCase().trim().replace(/[?.,!]$/, "");
-    const entry = cache[normalizedKey];
-    if (!entry) return null;
-
-    // Check TTL
-    if (Date.now() - entry.timestamp > this.CACHE_TTL_MS) {
-      delete cache[normalizedKey];
-      try {
-        if (isPlatformBrowser(this.platformId)) {
-          localStorage.setItem(this.QUERY_CACHE_KEY, JSON.stringify(cache));
-        }
-      } catch { }
-      return null;
-    }
-
-    return { response: entry.response, execution_time: entry.execution_time };
-  }
 
   private executeQuery(thread: ChatThread, query: string) {
     const sessionId = this.chatService.currentSessionId();
-
-    // --- Check local cache first ---
-    const cached = this.getCachedQuery(query);
-    if (cached) {
-      thread.isLoading = false;
-      thread.isTyping = true;
-      thread.executionTime = cached.execution_time;
-      thread.isCachedResult = true;
-      thread.aiMessage = {
-        content: '',
-        timestamp: new Date()
-      };
-
-      const transformed = this.transformReferences(cached.response);
-      this.typewriteResponse(thread, transformed);
-      this.scrollToBottom();
-
-      // Save to guest history
-      if (sessionId && sessionId < 0) {
-        this.chatService.saveGuestMessage(sessionId, { role: 'user', content: query });
-        this.chatService.saveGuestMessage(sessionId, {
-          role: 'assistant', content: cached.response, execution_time: cached.execution_time
-        });
-      }
-
-      // Auto-rename
-      if (sessionId && this.threads.length === 1) {
-        const session = this.chatService.sessions().find(s => s.id === sessionId);
-        if (session && session.title === 'New Chat') {
-          const newTitle = query.length > 30 ? query.substring(0, 30) + '...' : query;
-          this.chatService.renameChat(sessionId, newTitle).subscribe();
-        }
-      }
-      return; // Skip server call
-    }
 
     // --- No cache hit, call server with Streaming enabled ---
     const payload = {
@@ -365,8 +297,7 @@ export class MainSearchComponent implements AfterViewChecked {
                 } else if (data.done) {
                   thread.executionTime = data.execution_time;
                   thread.isTyping = false;
-                  // Final cache update
-                  this.setQueryCache(query, fullResponse, data.execution_time);
+
                 }
               } catch (e) {
                 console.warn('Error parsing SSE chunk', e);
@@ -486,17 +417,32 @@ export class MainSearchComponent implements AfterViewChecked {
     }, 0);
   }
 
-  private cycleLoadingSteps(thread: ChatThread) {
+  private cycleLoadingSteps(thread: ChatThread, query?: string) {
     let stepIndex = 0;
+    let pool = [...this.loadingSteps];
+
+    // Add query-specific steps if applicable
+    if (query) {
+      const q = query.toLowerCase();
+      if (q.includes('adept') || q.includes('system') || q.includes('project')) {
+        pool = [...this.contextLoadingSteps['adept'], ...pool];
+      } else if (q.includes('market') || q.includes('kenya') || q.includes('economy')) {
+        pool = [...this.contextLoadingSteps['market'], ...pool];
+      } else if (q.includes('innovation') || q.includes('creative') || q.includes('new')) {
+        pool = [...this.contextLoadingSteps['innovation'], ...pool];
+      }
+    }
+
+    thread.loadingStep = pool[0];
 
     const interval = setInterval(() => {
       if (!thread.isLoading) {
         clearInterval(interval);
         return;
       }
-      stepIndex = (stepIndex + 1) % this.loadingSteps.length;
-      thread.loadingStep = this.loadingSteps[stepIndex];
-    }, 2000);
+      stepIndex = (stepIndex + 1) % pool.length;
+      thread.loadingStep = pool[stepIndex];
+    }, 1800); // Slightly faster cycle for more realism
   }
 
   /**
@@ -574,26 +520,37 @@ export class MainSearchComponent implements AfterViewChecked {
       const trimmedFilename = filename.trim();
       const cleanPath = localPath.trim();
 
+      // Fix "route_" or internal names appearing as filename
+      const displayFilename = (trimmedFilename.startsWith('route_') || trimmedFilename.startsWith('detail_'))
+        ? extractFilename(cleanPath)
+        : trimmedFilename;
+
       if (isLocalPath(cleanPath)) {
         const sharePointUrl = toSharePointUrl(cleanPath);
-        return `[${trimmedFilename}](${sharePointUrl})`;
+        return `[${displayFilename}](${sharePointUrl})`;
       }
-      return `[${trimmedFilename}](${cleanPath})`;
+      return `[${displayFilename}](${cleanPath})`;
     });
 
     // Pass 2: Remove duplicate filename that appears before the markdown link
     result = result.replace(/([^\[\]]+?)\s+\[([^\]]+)\]\(/g, (match, before, inBrackets) => {
-      if (before.trim() === inBrackets.trim()) {
-        return `[${inBrackets}](`;
+      const trimmedBefore = before.trim();
+      const trimmedInBrackets = inBrackets.trim();
+      if (trimmedBefore === trimmedInBrackets || (trimmedInBrackets.startsWith('route_') && trimmedBefore)) {
+        return `[${trimmedInBrackets === 'route_*' ? trimmedBefore : trimmedInBrackets}](`;
       }
       return match;
     });
 
     // Pass 3: Convert markdown links with local paths to SharePoint URLs
     result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, filename, path) => {
+      const cleanFilename = (filename.startsWith('route_') || filename.startsWith('detail_'))
+        ? extractFilename(path)
+        : filename;
+
       if (isLocalPath(path)) {
         const sharePointUrl = toSharePointUrl(path);
-        return `[${filename}](${sharePointUrl})`;
+        return `[${cleanFilename}](${sharePointUrl})`;
       }
       // Keep web URLs as-is
       return match;
