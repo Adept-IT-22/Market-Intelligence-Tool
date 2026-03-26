@@ -352,7 +352,7 @@ def call_gemini_stream_sync(prompt_or_parts: Any):
         try:
             async def wrap():
                 try:
-                    async for chunk in call_gemini_stream_async(prompt):
+                    async for chunk in call_gemini_stream_async(prompt_or_parts):
                         if stop_event.is_set():
                             break
                         q.put(chunk)
