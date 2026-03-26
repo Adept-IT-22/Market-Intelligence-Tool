@@ -341,10 +341,42 @@ class DataIngester:
 
     def _process_image(self, file_path, master_id, routing_table_name, sectors, department):
         """
-        OCR/Vision is currently DISABLED as per user request.
+        Extract text and insights from images using Gemini Vision.
         """
-        logger.info(f"Image OCR is currently DISABLED. Skipping content extraction for: {file_path}")
-        return
+        if not HAS_VISION:
+            logger.error("Vision capabilities (google-generativeai/PIL) not installed. Skipping image.")
+            return
+
+        logger.info(f"Processing image with Gemini Vision: {file_path}")
+        try:
+            # 1. Open image
+            img = Image.open(file_path)
+            
+            # 2. Use Gemini 1.5 Flash for vision
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            prompt = (
+                "You are an expert OCR and image analyst for a Market Intelligence Tool.\n"
+                "1. EXTRACT ALL TEXT from this image exactly as it appears.\n"
+                "2. DESCRIBE CHARTS/TABLES: If there are any, extract the data points and metrics.\n"
+                "3. SUMMARY: Provide a concise summary of the visual content relevant to market intelligence.\n"
+                "Output as structured Markdown."
+            )
+            
+            response = model.generate_content([prompt, img])
+            text = response.text
+            
+            if not text or not text.strip():
+                logger.warning(f"No text or insights extracted from image: {file_path}")
+                return
+
+            # 3. Store in Qdrant/SQL
+            self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, department, "Image Analysis")
+            self.conn.commit()
+            logger.info(f"Image analysis complete for: {file_path}")
+            
+        except Exception as e:
+            logger.error(f"Image processing failed for {file_path}: {e}")
+            raise e
 
     def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, department, title_prefix):
         chunks = self._chunk_text(text, 1000)

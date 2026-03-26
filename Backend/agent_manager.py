@@ -17,6 +17,7 @@ from typing import Optional, Any, Generator, AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
 import queue
 import threading
+import base64
 
 load_dotenv()
 
@@ -135,8 +136,14 @@ def get_access_token() -> str:
             logger.error("No valid GCP credentials OR GEMINI_API_KEY found.")
         return fallback_key
 
-async def _call_gemini_api_internal(prompt: str) -> str:
-    """Internal function to call Gemini API with explicit retries."""
+async def _call_gemini_api_internal(prompt_or_parts: Any) -> str:
+    """Internal function to call Gemini API with explicit retries.
+    Accepts either a string prompt or a list of parts (multimodal).
+    """
+    if isinstance(prompt_or_parts, str):
+        parts = [{"text": prompt_or_parts}]
+    else:
+        parts = prompt_or_parts
     max_attempts = 5
     last_exception = None
     
@@ -146,11 +153,10 @@ async def _call_gemini_api_internal(prompt: str) -> str:
         "Content-Type": "application/json",
     }
     data = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {
             "temperature": 0.0,
             "maxOutputTokens": 8192,
-            "responseMimeType": "application/json" if "JSON" in prompt.upper() or "Output JSON:" in prompt else "text/plain"
         },
     }
 
@@ -232,18 +238,11 @@ async def _call_gemini_api_internal(prompt: str) -> str:
                 logger.error(f"Gemini Attempt #{attempt} failed FATALLY with {type(e).__name__}: {e}")
                 raise
 
-            except BaseException as e:
-                # Catch cancellation/system exit and re-raise immediately without retry
-                logger.error(f"Gemini call INTERRUPTED/CANCELLED: {type(e).__name__}: {e}")
-                raise
-
-    # If loop finishes without success (unreachable if last_exception logic is perfect, but safe fallback)
-    if last_exception:
-        raise last_exception
+    # If loop finishes without success
     raise RuntimeError("Gemini Max Retries Exceeded (Unknown Error)")
 
-async def call_gemini_async(prompt: str) -> str:
-    """Call Gemini with multi-loop safe rate limiting."""
+async def call_gemini_async(prompt_or_parts: Any) -> str:
+    """Call Gemini with rate limiting."""
     global _last_call_time
     sleep_time = 0
     with _gemini_lock:
@@ -258,10 +257,14 @@ async def call_gemini_async(prompt: str) -> str:
             
     if sleep_time > 0:
         await asyncio.sleep(sleep_time)
-    return await _call_gemini_api_internal(prompt)
+    return await _call_gemini_api_internal(prompt_or_parts)
 
-async def _call_gemini_stream_internal(prompt: str) -> AsyncGenerator[str, None]:
+async def _call_gemini_stream_internal(prompt_or_parts: Any) -> AsyncGenerator[str, None]:
     """Internal function to call Gemini API with multi-loop safe streaming."""
+    if isinstance(prompt_or_parts, str):
+        parts = [{"text": prompt_or_parts}]
+    else:
+        parts = prompt_or_parts
     global _last_call_time
     sleep_time = 0
     with _gemini_lock:
@@ -282,7 +285,7 @@ async def _call_gemini_stream_internal(prompt: str) -> AsyncGenerator[str, None]
         "Content-Type": "application/json",
     }
     data = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {
             "temperature": 0.0,
             "maxOutputTokens": 8192,
@@ -322,19 +325,19 @@ async def _call_gemini_stream_internal(prompt: str) -> AsyncGenerator[str, None]
                         logger.error(f"Streaming parser error: {e}")
                         break
 
-async def call_gemini_stream_async(prompt: str) -> AsyncGenerator[str, None]:
-    async for chunk in _call_gemini_stream_internal(prompt):
+async def call_gemini_stream_async(prompt_or_parts: Any) -> AsyncGenerator[str, None]:
+    async for chunk in _call_gemini_stream_internal(prompt_or_parts):
         yield chunk
 
-def call_gemini_sync(prompt: str) -> str:
+def call_gemini_sync(prompt_or_parts: Any) -> str:
     """Synchronous wrapper for agent_manager."""
     try:
-        return asyncio.run(call_gemini_async(prompt))
+        return asyncio.run(call_gemini_async(prompt_or_parts))
     except Exception as e:
         logger.error(f"Gemini call failed completely: {e}")
         raise
 
-def call_gemini_stream_sync(prompt: str):
+def call_gemini_stream_sync(prompt_or_parts: Any):
     """Bridge to run async generator in sync context for Flask.
 
     Uses a daemon thread + stop event so the background loop is cancelled
@@ -388,6 +391,36 @@ class AgentManager:
         self.collection_name = collection_name
         self.query = query
         self.chat_history = chat_history or []
+        self.image_parts = []
+        self._detect_images()
+        
+    def _detect_images(self):
+        """Scan query for attached images and load them as Gemini parts."""
+        # Frontend sends [Attached: 1742912445_filename.png]
+        matches = re.findall(r'\[Attached: ([^\]]+)\]', self.query)
+        upload_folder = os.path.join(current_directory, "uploads")
+        
+        for filename in matches:
+            filename = filename.strip()
+            if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                file_path = os.path.join(upload_folder, filename)
+                if os.path.exists(file_path):
+                    try:
+                        with open(file_path, "rb") as f:
+                            img_data = base64.b64encode(f.read()).decode("utf-8")
+                        
+                        ext = os.path.splitext(filename)[1].lower().replace('.', '')
+                        mime_type = f"image/{ext}" if ext != 'jpg' else "image/jpeg"
+                        
+                        self.image_parts.append({
+                            "inline_data": {
+                                "mime_type": mime_type,
+                                "data": img_data
+                            }
+                        })
+                        logger.info(f"Vision: Loaded image for analysis: {filename}")
+                    except Exception as e:
+                        logger.error(f"Failed to load image {filename}: {e}")
 
         # Initialize/Get Embeddings
         self.embeddings = get_embeddings_model()
@@ -1019,8 +1052,15 @@ Provide a detailed, structured response with:
 - A 'Sources Analyzed' section listing every unique source actually present in the context. If none were retrieved, say so instead of inventing citations.
 """
         
+        # Build Multimodal Parts
+        parts = [{"text": f"{system_prompt}\n\n{user_prompt}"}]
+        if self.image_parts:
+            # If user explicitly asks about an image, the image parts provide high-res visibility
+            parts.extend(self.image_parts)
+            logger.info(f"Vision: Sending {len(self.image_parts)} image(s) to Gemini.")
+
         try:
-            content = call_gemini_sync(f"{system_prompt}\n\n{user_prompt}")
+            content = call_gemini_sync(parts)
             return content
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
@@ -1062,4 +1102,10 @@ Provide a detailed, structured response with:
 - A 'Sources Analyzed' section listing EVERY unique source provided in the context, even those not directly cited.
 """
         
-        yield from call_gemini_stream_sync(f"{system_prompt}\n\n{user_prompt}")
+        # Build Multimodal Parts
+        parts = [{"text": f"{system_prompt}\n\n{user_prompt}"}]
+        if self.image_parts:
+            parts.extend(self.image_parts)
+            logger.info(f"Vision: Sending {len(self.image_parts)} image(s) to Gemini [Streaming].")
+
+        yield from call_gemini_stream_sync(parts)
