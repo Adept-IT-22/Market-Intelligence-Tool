@@ -2,7 +2,11 @@ import sqlite3
 import os
 import re
 
-db_path = 'd:/Projects/ProjectsWork\MIT/Backend/DB/market-intelligence.db'
+db_path = os.getenv("DATABASE_PATH") or '/app/DB/market-intelligence.db'
+# Fallback for local dev
+if not os.path.exists(db_path):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(current_dir, "DB", "market-intelligence.db")
 
 def map_to_department(sectors, source, title):
     sectors = (sectors or "").lower()
