@@ -1,8 +1,13 @@
 import sqlite3
 import os
 import re
+from qdrant_client import QdrantClient
 
 db_path = os.getenv("DATABASE_PATH") or '/app/DB/market-intelligence.db'
+# Qdrant Config
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
+COLLECTION_NAME   = "adept_database"
 # Fallback for local dev
 if not os.path.exists(db_path):
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -107,6 +112,16 @@ def run_report():
     sorted_domains = sorted(domains.items(), key=lambda x: x[1], reverse=True)
     for dom, count in sorted_domains[:10]:
         print(f'{dom}: {count}')
+
+    # Qdrant Stats
+    print("\n--- QDRANT VECTOR STORE ---")
+    try:
+        client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        collection_info = client.get_collection(COLLECTION_NAME)
+        print(f"Collection: {COLLECTION_NAME}")
+        print(f"Vector Count: {collection_info.points_count}")
+    except Exception as e:
+        print(f"Error fetching Qdrant stats: {e}")
 
     conn.close()
 

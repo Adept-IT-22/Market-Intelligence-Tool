@@ -7,6 +7,7 @@ WORKDIR /app
 # Install system dependencies needed for building wheels and git
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements.txt first for build cache efficiency
