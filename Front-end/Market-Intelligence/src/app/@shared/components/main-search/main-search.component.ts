@@ -468,11 +468,15 @@ export class MainSearchComponent implements AfterViewChecked {
     const localUserBaseAlt = 'C:/Users/imain/Adept Technologies Ltd/';
 
     // SharePoint mappings
+    // SharePoint mappings for different top-level folders
     const sharePointMappings: { [key: string]: string } = {
       '30. Cloud & Business Automation - Documents': 'https://adeptke.sharepoint.com/sites/ba/Shared%20Documents',
       '03. Marketing - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/03.%20Marketing%20-%20General',
       '36. BD Collateral - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/36.%20BD%20Collateral%20-%20General',
-      'Innovations - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/Innovations%20-%20General'
+      'Innovations - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/Innovations%20-%20General',
+      '12. Software Development - General': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/12.%20Software%20Development%20-%20General',
+      '2. Operation Records': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/2.%20Operation%20Records',
+      'Project Scoping': 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents/12.%20Software%20Development%20-%20General/Project%20Scoping'
     };
 
     const extractFilename = (path: string): string => {
@@ -487,19 +491,27 @@ export class MainSearchComponent implements AfterViewChecked {
 
     const toSharePointUrl = (localPath: string): string => {
       let normalizedPath = localPath.replace(/\\/g, '/');
-      normalizedPath = normalizedPath
+      
+      // Remove the base local path to get a relative path within the company drive
+      const relativeToDrive = normalizedPath
         .replace(localUserBase.replace(/\\/g, '/'), '')
         .replace(localUserBaseAlt, '');
 
+      // Check if it matches a known folder mapping
       for (const [folderName, sharePointBase] of Object.entries(sharePointMappings)) {
-        if (normalizedPath.startsWith(folderName)) {
-          const relativePath = normalizedPath.substring(folderName.length).replace(/^\//, '');
+        if (relativeToDrive.startsWith(folderName)) {
+          const relativePath = relativeToDrive.substring(folderName.length).replace(/^\//, '');
           if (!relativePath) return sharePointBase;
           const encodedPath = relativePath.split('/').map(s => encodeURIComponent(s)).join('/');
           return `${sharePointBase}/${encodedPath}`;
         }
       }
-      return '#';
+
+      // Fallback: If no specific folder mapping, try to point to the general site
+      // This ensures the link is at least "clickable" even if it's just the root
+      const generalBase = 'https://adeptke.sharepoint.com/sites/Adepttechnologiesltd/Shared%20Documents';
+      const encodedFull = relativeToDrive.split('/').map(s => encodeURIComponent(s)).join('/');
+      return `${generalBase}/${encodedFull}`;
     };
 
     // Pass 1: Handle [Source: filename | Link: path] format (often used by AgentManager)
