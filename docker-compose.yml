@@ -35,6 +35,8 @@ services:
       # Mount Config files
       - ./Backend/.env:/app/.env
       - ./Backend/service-account.json:/app/service-account.json
+      # Mount documents for synchronization
+      - ./temp_upload:/app/temp_upload
     expose:
       - "8000"
     ports:
