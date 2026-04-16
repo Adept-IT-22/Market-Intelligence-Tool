@@ -60,9 +60,9 @@ def sync_data():
         routing_table_name = row['table_name']
         
         # 3. Find the file on the server
-        # Try finding by basename (handles path mismatches)
-        basename = os.path.basename(original_source).lower()
-        actual_path = file_map.get(basename)
+        # Try finding by filename (handles Windows backslashes on Linux)
+        filename = original_source.replace('\\', '/').split('/')[-1].lower()
+        actual_path = file_map.get(filename)
         
         if not actual_path:
             logger.warning(f"Skipping Document #{master_id}: '{title}' — File not found in temp_upload (expected: {basename})")
