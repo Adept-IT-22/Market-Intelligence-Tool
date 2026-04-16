@@ -30,7 +30,7 @@ print(f"\n=== Qdrant adept_database total vectors: {count.count} ===")
 from sentence_transformers import SentenceTransformer
 model = SentenceTransformer("BAAI/bge-small-en")
 vec = model.encode("maize corn agriculture production Kenya").tolist()
-results = client.search(collection_name="adept_database", query_vector=vec, limit=3)
+results = client.query_points(collection_name="adept_database", query=vec, limit=3).points
 print("\n=== Top 3 Qdrant hits for 'maize corn agriculture production Kenya' ===")
 for r in results:
     p = r.payload

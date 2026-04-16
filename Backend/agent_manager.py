@@ -96,6 +96,7 @@ if not DATABASE_PATH:
 # Models
 EMBEDDING_MODEL = "BAAI/bge-small-en"
 COLLECTION_NAME = "adept_database"
+INDEX_COLLECTION = "document_index"  # PageIndex: document-level summaries
 
 # Global Cache for Embedding Model
 _CACHED_EMBEDDINGS = None
@@ -338,34 +339,27 @@ def call_gemini_sync(prompt_or_parts: Any) -> str:
         raise
 
 def call_gemini_stream_sync(prompt_or_parts: Any):
-    """Bridge to run async generator in sync context for Flask.
-
-    Uses a daemon thread + stop event so the background loop is cancelled
-    if the client disconnects early (generator is closed).
-    """
+    import contextlib
     q = queue.Queue()
-    loop = asyncio.new_event_loop()
     stop_event = threading.Event()
 
     def run_async():
-        asyncio.set_event_loop(loop)
         try:
             async def wrap():
-                try:
-                    async for chunk in call_gemini_stream_async(prompt_or_parts):
+                # aclosing ensures the gen.aclose() is called and awaited even on errors/breaks
+                async with contextlib.aclosing(call_gemini_stream_async(prompt_or_parts)) as gen:
+                    async for chunk in gen:
                         if stop_event.is_set():
                             break
                         q.put(chunk)
-                finally:
-                    q.put(None)  # Always signal end-of-stream
-            loop.run_until_complete(wrap())
+                q.put(None)
+            
+            asyncio.run(wrap())
         except Exception as e:
             logger.error(f"Streaming thread error: {e}")
             q.put(None)
-        finally:
-            loop.close()
 
-    worker = threading.Thread(target=run_async, daemon=True)  # daemon=True prevents leaks
+    worker = threading.Thread(target=run_async, daemon=True)
     worker.start()
 
     try:
@@ -375,7 +369,7 @@ def call_gemini_stream_sync(prompt_or_parts: Any):
                 break
             yield chunk
     finally:
-        stop_event.set()  # Signal background thread to stop on early disconnect
+        stop_event.set()
 
 class AgentManager:
     def __init__(
@@ -436,14 +430,49 @@ class AgentManager:
         # Gemini logic is handled via call_gemini_sync
         logger.info(f"Configuring Gemini LLM ({self.llm_model_name})")
 
-    def search_qdrant(self, top_k=5):
-        logger.info("Searching Qdrant...")
+    def search_qdrant(self, top_k=5, keyword_filter=None):
+        """Two-tier retrieval: PageIndex (document summaries) → filtered chunk search."""
+        logger.info("Searching Qdrant (Two-Tier PageIndex)...")
         try:
-            results = self.qdrant_client.search(
+            from qdrant_client.models import Filter, FieldCondition, MatchAny
+
+            # --- Tier 1: Search document-level summaries ---
+            relevant_doc_ids = []
+            try:
+                _tier1 = self.qdrant_client.query_points(
+                    collection_name=INDEX_COLLECTION,
+                    query=self.query_vector.tolist(),
+                    limit=15
+                )
+                doc_results = _tier1.points
+                relevant_doc_ids = [
+                    r.payload.get("master_id") for r in doc_results
+                    if r.score > 0.45 and r.payload.get("master_id") is not None
+                ]
+                logger.info(f"PageIndex Tier 1: {len(relevant_doc_ids)} relevant documents (from {len(doc_results)} searched)")
+            except Exception as idx_err:
+                logger.warning(f"PageIndex search failed (falling back to unfiltered): {idx_err}")
+
+            # --- Tier 2: Search chunks, filtered to matching documents ---
+            chunk_filter = None
+            if relevant_doc_ids:
+                chunk_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="master_id",
+                            match=MatchAny(any=relevant_doc_ids)
+                        )
+                    ]
+                )
+
+            _tier2 = self.qdrant_client.query_points(
                 collection_name=self.collection_name,
-                query_vector=self.query_vector,
+                query=self.query_vector.tolist(),
+                query_filter=chunk_filter,
                 limit=top_k
             )
+            results = _tier2.points
+            logger.info(f"PageIndex Tier 2: {len(results)} chunks retrieved (filtered={chunk_filter is not None})")
             return results
         except Exception as e:
             logger.error(f"Qdrant search failed: {e}")
@@ -552,6 +581,7 @@ class AgentManager:
                 """
                 
                 df_kw = pd.read_sql_query(query, conn, params=params_full)
+                logger.info(f"DEBUG: Keyword search raw results (top 5):\n{df_kw.head(5)}")
                 for _, row in df_kw.iterrows():
                     table_name = row['table_name']
                     score = row['score']
@@ -613,22 +643,28 @@ class AgentManager:
         {master_text}
         
         Return top 8 table names (comma-separated):
+        If the query mentions a 'process', 'workflow', or 'step-by-step', prioritizing tables with those words in the title is mandatory.
         """
 
         try:
             content = call_gemini_sync(user_prompt)
             logger.info(f"Level 1 Raw Response: {content.strip()}")
-            # CLEANING: Handle LLM conversational drift (e.g., "The top tables are: t1, t2")
-            # Extract anything that looks like a table name (route_...)
-            possible_tables = re.findall(r'route_[a-z0-9_]+', content)
-            if not possible_tables:
-                 # Fallback to comma split if regex fails but strip carefully
-                 routing_tables = [t.strip().strip('"').strip("'").strip("`").split(':')[-1].strip() for t in content.split(',') if t.strip()]
-            else:
-                 routing_tables = possible_tables
+            # CLEANING: Extract anything that looks like a table name
+            # Tables can be 'route_...' or simple names like 'Project', 'Worker'
+            # We filter against the actual safe_candidates we provided to the LLM
+            possible_tables = [t.strip().strip('"').strip("'").strip("`").strip() for t in content.replace('\n', ',').split(',') if t.strip()]
             
-            # Clean invalid segments from split fallback
-            routing_tables = [t for t in routing_tables if t.startswith('route_')]
+            routing_tables = []
+            for t in possible_tables:
+                # Direct match or fuzzy match (e.g. "The Project table" -> "Project")
+                for cand in safe_candidates:
+                    if cand.lower() in t.lower():
+                        routing_tables.append(cand)
+                        break
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            routing_tables = [x for x in routing_tables if not (x in seen or seen.add(x))]
             
             # FINAL CAP: Ensure no more than 8 tables are processed by Level 2
             if len(routing_tables) > 8:
@@ -719,13 +755,18 @@ class AgentManager:
             content = call_gemini_sync(user_prompt)
             
             try:
-                # CLEANING: Strip markdown code blocks if the LLM adds them
-                content_clean = re.sub(r'```json\s*|\s*```', '', content).strip()
-                result = json.loads(content_clean)
-                logger.info(f"Level 2 Selected: {result}")
-                return result
+                # CLEANING: Robustly extract the first JSON object using regex
+                match = re.search(r'\{.*\}', content, re.DOTALL)
+                if match:
+                    content_clean = match.group(0)
+                    result = json.loads(content_clean)
+                    logger.info(f"Level 2 Selected: {result}")
+                    return result
+                else:
+                    logger.warning("No JSON object found in Level 2 response.")
+                    return {'sql_tables': [], 'qdrant_ids': []}
             except json.JSONDecodeError as je:
-                logger.error(f"JSON Decode Error in Routing Response: {je}")
+                logger.error(f"JSON Decode Error in Routing Response: {je} | Raw Content: {content[:200]}")
                 return {'sql_tables': [], 'qdrant_ids': []}
 
         except Exception as e:
@@ -915,16 +956,9 @@ class AgentManager:
 
         # Step 4: Process Semantic Search (Safety Net)
         semantic_context = ""
-        # Determine if we should suppress the safety net response
-        is_research_query = len(self.query.split()) > 4
-        hierarchical_success = len(detail_context) > 2000
-        
-        if is_research_query and hierarchical_success:
-            logger.info("Strong Hierarchical Context found: Suppressing Safety Net noise.")
-            semantic_results = [] # Ignore semantic results to keep focus
-        else:
-            # Keep top results only
-            semantic_results = semantic_results[:3]
+        # We NO LONGER suppress semantic results even if hierarchical is large.
+        # Semantic vectors often contain the actual answer when hierarchical routing pulls legal/noise tables.
+        semantic_results = semantic_results[:5]
 
         for point in semantic_results:
              payload = point.payload
@@ -970,14 +1004,10 @@ class AgentManager:
             detail_context = future_details.result()
             semantic_results = future_semantic.result()
 
-        # Suppress semantic noise when hierarchical retrieval is strong
-        is_research_query = len(self.query.split()) > 4
-        hierarchical_success = len(detail_context) > 2000
-        if is_research_query and hierarchical_success:
-            logger.info("[Stream] Strong Hierarchical Context: Suppressing Safety Net noise.")
-            semantic_results = []
-        else:
-            semantic_results = semantic_results[:3]
+        # Step 4: Process Semantic Search (Safety Net)
+        # We NO LONGER suppress semantic results even if hierarchical is large.
+        # Semantic vectors often contain the actual answer when hierarchical routing pulls legal/noise tables.
+        semantic_results = semantic_results[:5]
 
         semantic_context = ""
         for point in semantic_results:

@@ -123,13 +123,14 @@ def get_cached_response(query: str):
         embedder = get_embedder()
         vector = embedder.encode(query).tolist()
 
-        search_result = client.search(
+        _cache_res = client.query_points(
             collection_name=CACHE_COLLECTION,
-            query_vector=vector,
+            query=vector,
             limit=1
         )
+        search_result = _cache_res.points
         
-        if search_result and search_result[0].score > 0.90:
+        if search_result and search_result[0].score > 0.96:
             res = search_result[0]
             payload = res.payload or {}
             created_at = payload.get("created_at")

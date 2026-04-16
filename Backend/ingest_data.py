@@ -42,6 +42,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "DB/market-in
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
 COLLECTION_NAME = "adept_database"
+INDEX_COLLECTION = "document_index"  # PageIndex: document-level summaries
 EMBEDDING_MODEL = "BAAI/bge-small-en"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -95,10 +96,82 @@ class DataIngester:
             raise ValueError(f"Invalid table name: {table_name}")
         return table_name
 
-    def _chunk_text(self, text, size=1000):
-        """Helper to chunk text into specific sizes."""
+    def _chunk_text(self, text, max_size=1000):
+        """Semantic chunking: split on paragraph boundaries, not character count.
+        Falls back to sentence splitting, then hard splits for dense text."""
         if not text: return []
-        return [text[i:i+size] for i in range(0, len(text), size)]
+        
+        # Split on paragraph breaks (double newline, or section headers)
+        paragraphs = re.split(r'\n\s*\n|\n(?=[A-Z#\-\*])', text)
+        
+        # If we only got 1 giant block, try sentence splitting
+        if len(paragraphs) <= 1 and len(text) > max_size:
+            paragraphs = re.split(r'(?<=[.!?])\s+', text)
+        
+        chunks = []
+        current = ""
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+            # If adding this paragraph exceeds limit and we have content, flush
+            if len(current) + len(para) + 2 > max_size and current:
+                chunks.append(current.strip())
+                current = para
+            else:
+                current += "\n\n" + para if current else para
+        
+        if current.strip():
+            chunks.append(current.strip())
+        
+        # Safety: if any chunk is still too large, hard-split it
+        final_chunks = []
+        for chunk in chunks:
+            if len(chunk) > max_size * 1.5:
+                for i in range(0, len(chunk), max_size):
+                    final_chunks.append(chunk[i:i+max_size])
+            else:
+                final_chunks.append(chunk)
+        
+        return final_chunks
+
+    def _extract_keywords(self, text, top_n=5):
+        """Extract top keywords from text using frequency + stopword removal."""
+        stopwords = {
+            'the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'about',
+            'what', 'how', 'why', 'when', 'where', 'who', 'which', 'is', 'are', 'was',
+            'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
+            'will', 'would', 'could', 'should', 'may', 'might', 'can', 'shall',
+            'not', 'no', 'but', 'or', 'and', 'so', 'if', 'then', 'than', 'this',
+            'that', 'these', 'those', 'it', 'its', 'from', 'also', 'more', 'their',
+            'they', 'them', 'we', 'our', 'you', 'your', 'he', 'she', 'his', 'her'
+        }
+        tokens = re.findall(r'[a-z0-9]+', text.lower())
+        filtered = [t for t in tokens if t not in stopwords and len(t) >= 3]
+        # Count frequency
+        freq = {}
+        for t in filtered:
+            freq[t] = freq.get(t, 0) + 1
+        # Sort by frequency and return top N as comma-separated string
+        top = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:top_n]
+        return ",".join([t[0] for t in top])
+
+    def _score_importance(self, text):
+        """Heuristic importance score (0.0-1.0) based on content signals."""
+        score = 0.3  # base score
+        # Numbers/percentages indicate data-rich content
+        numbers = len(re.findall(r'\d+\.?\d*%?', text))
+        if numbers > 5: score += 0.3
+        elif numbers > 2: score += 0.15
+        # Currency/financial indicators
+        if re.search(r'[$€£¥KSh]|USD|KES|revenue|profit|cost|price|budget', text, re.I):
+            score += 0.1
+        # Named entities (capitalized multi-word phrases)
+        entities = len(re.findall(r'[A-Z][a-z]+ [A-Z][a-z]+', text))
+        if entities > 3: score += 0.1
+        # Length signals depth
+        if len(text) > 500: score += 0.1
+        return min(1.0, score)
 
     def process_input(self, input_path: str, source_type: str, title: str, sectors: str, summary: str, department: str = "General"):
         logger.info(f"Processing {source_type}: {input_path} for department: {department}")
@@ -181,7 +254,47 @@ class DataIngester:
         self._create_routing_table(routing_table_name)
         self.conn.commit()
         
+        # --- v2: Auto-index into PageIndex ---
+        self._index_to_page_index(master_id, title, summary, source, sectors, department, source_type, routing_table_name)
+        
         return master_id, routing_table_name
+
+    def _index_to_page_index(self, master_id, title, summary, source, sectors, department, datatype, table_name):
+        """Add this document to the PageIndex (document_index) Qdrant collection."""
+        try:
+            # Weight title heavily for embedding quality
+            embed_text = f"{title}. {title}. {summary}. Sectors: {sectors}. Department: {department}"
+            vector = self.embedder.encode(embed_text).tolist()
+            
+            point = PointStruct(
+                id=int(master_id),
+                vector=vector,
+                payload={
+                    "master_id": master_id,
+                    "title": title,
+                    "summary": summary,
+                    "source": source,
+                    "sectors": sectors,
+                    "department": department,
+                    "datatype": datatype,
+                    "table_name": table_name,
+                    "indexed_at": datetime.now().isoformat()
+                }
+            )
+            
+            # Ensure collection exists
+            existing = [c.name for c in self.qdrant.get_collections().collections]
+            if INDEX_COLLECTION not in existing:
+                from qdrant_client.models import VectorParams, Distance
+                self.qdrant.create_collection(
+                    collection_name=INDEX_COLLECTION,
+                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+                )
+            
+            self.qdrant.upsert(collection_name=INDEX_COLLECTION, points=[point])
+            logger.info(f"PageIndex: Indexed document #{master_id} '{title}'")
+        except Exception as e:
+            logger.warning(f"PageIndex indexing failed for #{master_id}: {e} (non-fatal)")
 
     def _create_routing_table(self, table_name):
         self._validate_table_name(table_name)
@@ -379,7 +492,7 @@ class DataIngester:
             raise e
 
     def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, department, title_prefix):
-        chunks = self._chunk_text(text, 1000)
+        chunks = self._chunk_text(text, max_size=1000)  # Now uses semantic chunking
         for k, chunk in enumerate(chunks):
             embedding = self.embedder.encode(chunk).tolist()
             point_id = str(uuid.uuid4())
@@ -389,7 +502,11 @@ class DataIngester:
                 "source": source,
                 "text": chunk,
                 "sectors": sectors,
-                "department": department
+                "department": department,
+                # --- v2: Enriched metadata ---
+                "keywords": self._extract_keywords(chunk),
+                "importance": self._score_importance(chunk),
+                "ingested_at": datetime.now().isoformat()
             }
             self.qdrant.upsert(
                 collection_name=COLLECTION_NAME,

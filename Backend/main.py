@@ -455,8 +455,126 @@ def get_upload_limits():
         "allowed_extensions": list(ALLOWED_EXTENSIONS)
     }
 
+# ============== WORKSPACE ENDPOINTS (v2) ==============
+from workspace_manager import (
+    create_project, list_projects, get_project, delete_project,
+    save_artifact, list_artifacts, get_artifact, get_project_context
+)
+
+@app.route('/projects', methods=['GET'])
+@jwt_required
+def api_list_projects():
+    """List all workspace projects."""
+    projects = list_projects()
+    return jsonify({"projects": projects}), 200
+
+@app.route('/projects', methods=['POST'])
+@jwt_required
+def api_create_project():
+    """Create a new workspace project."""
+    data = request.json
+    name = data.get("name")
+    description = data.get("description", "")
+    if not name:
+        return jsonify({"error": "Project name is required"}), 400
+    project_id = create_project(name, description, user_id=g.user_id)
+    return jsonify({"project_id": project_id, "success": True}), 201
+
+@app.route('/projects/<project_id>', methods=['GET'])
+@jwt_required
+def api_get_project(project_id):
+    """Get project details + artifacts."""
+    project = get_project(project_id)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    return jsonify({"project": project}), 200
+
+@app.route('/projects/<project_id>', methods=['DELETE'])
+@jwt_required
+def api_delete_project(project_id):
+    """Delete a workspace project."""
+    success = delete_project(project_id)
+    if not success:
+        return jsonify({"error": "Project not found"}), 404
+    return jsonify({"success": True}), 200
+
+@app.route('/projects/<project_id>/artifacts', methods=['GET'])
+@jwt_required
+def api_list_artifacts(project_id):
+    """List all artifacts for a project."""
+    artifacts = list_artifacts(project_id)
+    return jsonify({"artifacts": artifacts}), 200
+
+@app.route('/projects/<project_id>/artifacts/<filename>', methods=['GET'])
+@jwt_required
+def api_get_artifact(project_id, filename):
+    """Read a specific artifact."""
+    content = get_artifact(project_id, filename)
+    if content is None:
+        return jsonify({"error": "Artifact not found"}), 404
+    return jsonify({"content": content}), 200
+
+@app.route('/projects/<project_id>/query', methods=['POST'])
+@jwt_required
+def api_project_query(project_id):
+    """Query within project context — results auto-saved as artifacts."""
+    start_time = time.perf_counter()
+    data = request.json
+    user_query = data.get("query")
+    session_id = data.get("session_id")
+
+    if not user_query:
+        return jsonify({"error": "Missing 'query' field"}), 400
+
+    project = get_project(project_id)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Build context with project memory
+    project_context = get_project_context(project_id)
+
+    chat_history = []
+    if session_id:
+        try: chat_history = get_chat_messages(session_id)
+        except: pass
+
+    # Import AgentLoop here if not at top of file to avoid circular imports
+    from agent_loop import AgentLoop
+    
+    loop = AgentLoop(
+        query=user_query, 
+        project_id=project_id, 
+        session_id=session_id, 
+        chat_history=chat_history
+    )
+    
+    # Run the full plan -> retrieve -> think -> act -> store cycle
+    loop_result = loop.run()
+    results = loop_result["answer"]
+
+    duration = time.perf_counter() - start_time
+
+    # Save to chat history if session exists
+    if session_id:
+        try:
+            add_chat_message(session_id, 'user', user_query)
+            add_chat_message(session_id, 'assistant', results, round(duration, 2))
+        except Exception as e:
+            logger.warning(f"Failed to save history: {e}")
+
+    set_cached_response(user_query, results)
+
+    return jsonify({
+        "Results": results,
+        "execution_time": round(duration, 2),
+        "artifact": loop_result["artifact"],
+        "project_id": project_id,
+        "confidence": loop_result["confidence"],
+        "plan": loop_result["plan_executed"]
+    })
+
 if __name__ == "__main__":
     logger.info("App starting...")
     
-    app.run(host="0.0.0.0", port=8000, threaded=True)
+    app.run(host="0.0.0.0", port=5000, threaded=True)
     
