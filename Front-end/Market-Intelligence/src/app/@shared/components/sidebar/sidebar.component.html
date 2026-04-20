@@ -12,6 +12,11 @@
             <span *ngIf="uiService.isSidebarExpanded()">New Chat</span>
         </button>
 
+        <button class="new-chat-btn" routerLink="/reports" routerLinkActive="active" [title]="'Report Studio'">
+            <mat-icon>assessment</mat-icon>
+            <span *ngIf="uiService.isSidebarExpanded()">Report Studio</span>
+        </button>
+
         <!-- Chat History -->
         <div class="history-section" *ngIf="uiService.isSidebarExpanded()">
             <h3 class="section-title">History</h3>

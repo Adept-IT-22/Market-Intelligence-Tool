@@ -36,10 +36,12 @@ interface UploadedFile {
   uploadedFilename: string;
 }
 
+import { RouterLink } from '@angular/router';
+
 @Component({
   selector: 'app-main-search',
   standalone: true,
-  imports: [FormsModule, CommonModule, MarkdownModule, MatIconModule],
+  imports: [FormsModule, CommonModule, MarkdownModule, MatIconModule, RouterLink],
   templateUrl: './main-search.component.html',
   styleUrl: './main-search.component.scss'
 })

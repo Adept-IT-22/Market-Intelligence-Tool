@@ -7,5 +7,12 @@ export const routes: Routes = [
       import('./Pages/home/home.component').then(
         (m) => m.HomeComponent
       ),
-  }
+    },
+    {
+    path: 'reports',
+    loadComponent: () =>
+      import('./Pages/report-studio/report-studio.component').then(
+        (m) => m.ReportStudioComponent
+      ),
+    }
 ];

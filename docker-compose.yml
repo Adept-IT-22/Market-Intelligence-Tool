@@ -65,3 +65,4 @@ networks:
 volumes:
   qdrant_storage:
 
+

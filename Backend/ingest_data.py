@@ -482,7 +482,7 @@ class DataIngester:
                 logger.warning(f"No text or insights extracted from image: {file_path}")
                 return
 
-            # 3. Store in Qdrant/SQL
+            # 3. Store in Qdrant/SQL/ES
             self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, department, "Image Analysis")
             self.conn.commit()
             logger.info(f"Image analysis complete for: {file_path}")
@@ -491,11 +491,15 @@ class DataIngester:
             logger.error(f"Image processing failed for {file_path}: {e}")
             raise e
 
-    def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, department, title_prefix):
+    def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, department, title_prefix, doc_type="general", section_name=None):
         chunks = self._chunk_text(text, max_size=1000)  # Now uses semantic chunking
         for k, chunk in enumerate(chunks):
             embedding = self.embedder.encode(chunk).tolist()
             point_id = str(uuid.uuid4())
+            
+            # Metadata for both DBs
+            ingested_at = datetime.now().isoformat()
+            
             payload = {
                 "master_id": master_id,
                 "routing_table": routing_table_name,
@@ -503,19 +507,24 @@ class DataIngester:
                 "text": chunk,
                 "sectors": sectors,
                 "department": department,
-                # --- v2: Enriched metadata ---
+                "section_name": section_name or title_prefix,
+                "doc_type": doc_type,
                 "keywords": self._extract_keywords(chunk),
                 "importance": self._score_importance(chunk),
-                "ingested_at": datetime.now().isoformat()
+                "ingested_at": ingested_at
             }
+            
+            # 1. Upsert to Qdrant (Semantic + Metadata)
             self.qdrant.upsert(
                 collection_name=COLLECTION_NAME,
                 points=[PointStruct(id=point_id, vector=embedding, payload=payload)]
             )
+            
+            # 2. Insert into SQL Routing Table
             self.cursor.execute(f"""
                 INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, Department, qdrant_source, qdrant_point_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (master_id, f"{title_prefix} Part {k+1}", "Text", sectors, department, source, point_id))
+            """, (master_id, f"{title_prefix} Part {k+1}", "Text/Hybrid", sectors, department, source, point_id))
         
         self.conn.commit()
 

@@ -3,6 +3,7 @@ import json
 from flask_cors import CORS
 import time
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 import logging
 from agent_manager import AgentManager, get_embeddings_model
@@ -16,6 +17,7 @@ from models import (
 )
 from auth import hash_password, verify_password, create_token, jwt_required, jwt_optional
 from cache_manager import get_cached_response, set_cached_response
+from report_engine import engine, REPORT_TYPES
 
 #Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -572,6 +574,128 @@ def api_project_query(project_id):
         "confidence": loop_result["confidence"],
         "plan": loop_result["plan_executed"]
     })
+
+# ============== REPORT AUTOMATION ENGINE ENDPOINTS ==============
+
+@app.route('/reports/types', methods=['GET'])
+@jwt_optional
+def list_report_types():
+    """List available report categories and their titles."""
+    types = [{"id": k, "title": v["title"]} for k, v in REPORT_TYPES.items()]
+    return jsonify({"report_types": types}), 200
+
+@app.route('/reports/questions/<report_type>', methods=['GET'])
+@jwt_optional
+def get_report_questions(report_type):
+    """Fetch the multi-step wizard schema for a report type."""
+    if report_type not in REPORT_TYPES:
+        return jsonify({"error": "Unknown report type"}), 404
+    return jsonify({"schema": REPORT_TYPES[report_type]["sections"]}), 200
+
+@app.route('/reports/generate', methods=['POST'])
+@jwt_optional
+def generate_report_draft():
+    """
+    Generate a section-by-section draft from wizard answers.
+    Expects: { "type": "sprint", "answers": {...} }
+    """
+    data = request.json
+    report_type = data.get("type")
+    answers = data.get("answers", {})
+    
+    if not report_type or report_type not in REPORT_TYPES:
+        return jsonify({"error": "Invalid or missing report type"}), 400
+
+    try:
+        draft = engine.generate_report_draft(report_type, answers)
+        return jsonify({"draft": draft, "success": True}), 200
+    except Exception as e:
+        logger.error(f"Report generation failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/reports/refine', methods=['POST'])
+@jwt_optional
+def refine_report_section():
+    """
+    Refine a specific section using a targeted action (Executive, Clarify, Shorten).
+    """
+    data = request.json
+    report_type = data.get("type")
+    section_id = data.get("section_id")
+    action = data.get("action")
+    current_text = data.get("current_text")
+    answers = data.get("answers", {})
+
+    if not all([report_type, section_id, action, current_text]):
+        return jsonify({"error": "Missing required fields"}), 400
+
+    try:
+        refined_text = engine.refine_section(report_type, section_id, action, current_text, answers)
+        return jsonify({"refined_text": refined_text, "success": True}), 200
+    except Exception as e:
+        logger.error(f"Refinement failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/reports/analyze', methods=['POST'])
+@jwt_optional
+def analyze_report_consistency():
+    """
+    Analyze the full report for inconsistencies, risks, and suggestions.
+    """
+    data = request.json
+    report_type = data.get("type")
+    sections = data.get("sections") # The current draft object
+
+    if not report_type or not sections:
+        return jsonify({"error": "Missing report type or sections"}), 400
+
+    try:
+        analysis = engine.analyze_report(report_type, sections)
+        return jsonify({"analysis": analysis, "success": True}), 200
+    except Exception as e:
+        logger.error(f"Analysis failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/reports/export', methods=['POST'])
+@jwt_optional
+def export_report_docx():
+    """
+    Finalize and export a report to DOCX.
+    Expects: { "type": "sprint", "data": {...}, "project_id": "optional-id" }
+    """
+    data = request.json
+    report_type = data.get("type")
+    report_data = data.get("data", {})
+    project_id = data.get("project_id")
+    
+    if not report_type or report_type not in REPORT_TYPES:
+        return jsonify({"error": "Invalid report type"}), 400
+
+    # 1. Generate local filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    filename = f"{timestamp}_{REPORT_TYPES[report_type]['title'].replace(' ', '_')}.docx"
+    temp_path = os.path.join(UPLOAD_FOLDER, filename)
+    
+    try:
+        # 2. Fill Template
+        success = engine.export_to_docx(report_type, report_data, temp_path)
+        if not success:
+            return jsonify({"error": "Failed to generate DOCX. Template missing?"}), 500
+            
+        # 3. If project_id is provided, save as artifact
+        if project_id:
+            from workspace_manager import save_artifact
+            # Note: save_artifact takes markdown content by default, 
+            # we may need a specific Binary Artifact handler later, 
+            # but for now we'll just return the file.
+            pass
+            
+        from flask import send_file
+        return send_file(temp_path, as_attachment=True, download_name=filename)
+        
+    except Exception as e:
+        logger.error(f"Export failed: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     logger.info("App starting...")

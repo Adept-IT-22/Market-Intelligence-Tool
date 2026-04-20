@@ -290,6 +290,112 @@
         color: var(--text-secondary);
         line-height: 1.6;
     }
+
+    .product-pillar-cta {
+        margin-top: 32px;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+    }
+
+    .cta-card {
+        background: var(--glass-bg);
+        backdrop-filter: blur(12px);
+        border: 1px solid var(--glass-border);
+        border-radius: 20px;
+        padding: 24px;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        width: 100%;
+        max-width: 500px;
+        text-align: left;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+
+        &::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--accent-gradient);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 0;
+        }
+
+        .cta-icon {
+            width: 56px;
+            height: 56px;
+            background: rgba(124, 58, 237, 0.1);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--accent-primary);
+            flex-shrink: 0;
+            z-index: 1;
+            transition: all 0.3s ease;
+
+            mat-icon {
+                font-size: 28px;
+                width: 28px;
+                height: 28px;
+            }
+        }
+
+        .cta-text {
+            flex-grow: 1;
+            z-index: 1;
+
+            h3 {
+                font-size: 1.2rem;
+                font-weight: 700;
+                margin: 0 0 4px 0;
+                color: var(--text-primary);
+                font-family: 'Outfit';
+            }
+
+            p {
+                font-size: 0.9rem;
+                margin: 0;
+                color: var(--text-secondary);
+                line-height: 1.4;
+                text-align: left;
+            }
+        }
+
+        .arrow {
+            color: var(--text-muted);
+            transition: all 0.3s ease;
+            z-index: 1;
+        }
+
+        &:hover {
+            transform: translateY(-8px) scale(1.02);
+            border-color: var(--accent-primary);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+
+            &::before {
+                opacity: 0.03;
+            }
+
+            .cta-icon {
+                background: var(--accent-primary);
+                color: white;
+                transform: rotate(-5deg);
+            }
+
+            .arrow {
+                color: var(--accent-primary);
+                transform: translateX(6px);
+            }
+        }
+    }
 }
 
 /* Chat Area & Threads */

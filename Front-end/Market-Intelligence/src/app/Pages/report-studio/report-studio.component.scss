@@ -1,0 +1,519 @@
+.studio-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--navbar-height, 0px));
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+  padding: 16px;
+  gap: 16px;
+}
+
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+}
+
+// --- Header ---
+.studio-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 24px;
+  min-height: 72px;
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    mat-icon {
+      color: var(--accent-primary);
+      filter: drop-shadow(0 0 8px var(--accent-primary));
+    }
+
+    .adept-logo {
+      font-size: 1.4rem;
+      font-weight: 700;
+      font-family: 'Outfit', sans-serif;
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .report-title {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      padding-left: 12px;
+      border-left: 1px solid var(--border-color);
+    }
+  }
+
+  .actions {
+    display: flex;
+    gap: 12px;
+  }
+}
+
+// --- Main Layout ---
+.studio-main {
+  display: flex;
+  flex: 1;
+  gap: 16px;
+  overflow: hidden;
+}
+
+// --- Left Pane (Form/Stepper) ---
+.left-pane {
+  flex: 0 0 400px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  .stepper {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-bottom: 1px solid var(--border-color);
+
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+
+      .step-num {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        border: 1px solid var(--text-muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.8rem;
+      }
+
+      .step-title {
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: var(--text-secondary);
+      }
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      &.active {
+        background: rgba(124, 58, 237, 0.1);
+
+        .step-num {
+          background: var(--accent-primary);
+          border-color: var(--accent-primary);
+          color: white;
+        }
+
+        .step-title {
+          color: var(--text-primary);
+        }
+      }
+
+      .edited-tag {
+        margin-left: auto;
+        color: var(--accent-primary);
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+      }
+    }
+  }
+
+  .form-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+
+    .section-card {
+      h3 {
+        margin-bottom: 4px;
+        font-family: 'Outfit';
+      }
+
+      .subtitle {
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        margin-bottom: 24px;
+      }
+
+      .full-width {
+        width: 100%;
+      }
+    }
+  }
+}
+
+// --- Right Pane (The Paper) ---
+.right-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+
+  .paper {
+    flex: 1;
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+
+    .paper-header {
+      padding: 16px 24px;
+      background: rgba(255, 255, 255, 0.03);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      .preview-badge {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--accent-primary);
+        font-weight: 700;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+      }
+
+      .editing-state {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+
+        strong {
+          color: var(--text-primary);
+        }
+      }
+    }
+
+    .document-scroller {
+      flex: 1;
+      overflow-y: auto;
+      padding: 60px 80px;
+      background: #e5e7eb; // Light gray "desk" background
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative; // For sidebar bar
+
+      .doc-sidebar-bar {
+        position: absolute;
+        left: calc(50% - 400px); // Align with paper left edge
+        top: 60px;
+        height: calc(100% - 120px);
+        width: 14px;
+        z-index: 10;
+        object-fit: cover;
+      }
+
+      // The "Paper" sheet
+      .branded-paper-header,
+      .paper-section,
+      .branded-paper-footer {
+        background: white;
+        width: 100%;
+        max-width: 800px;
+        color: #1f2937;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        position: relative;
+      }
+
+      .branded-paper-header {
+        padding: 40px 60px 20px 84px; // Extra left padding for sidebar bar
+        border-top-left-radius: 4px;
+        border-top-right-radius: 4px;
+
+        .brand-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 30px;
+          border-bottom: 2px solid #ebf1f9;
+          padding-bottom: 20px;
+
+          .preview-logo {
+            height: 50px;
+            width: auto;
+            object-fit: contain;
+          }
+
+          .brand-text {
+            text-align: right;
+
+            .org-name {
+              font-family: 'Outfit', sans-serif;
+              font-size: 1.1rem;
+              font-weight: 800;
+              color: #1d4e89;
+              margin: 0;
+            }
+
+            .tagline {
+              font-size: 0.65rem;
+              font-weight: 600;
+              color: #6b7280;
+              margin: 0;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+            }
+          }
+        }
+
+        .doc-metadata {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+          padding: 16px;
+          background: #f8fafc;
+          border-radius: 8px;
+          font-size: 0.8rem;
+
+          .meta-row {
+            display: flex;
+            gap: 8px;
+
+            .m-label {
+              font-weight: 700;
+              color: #475569;
+            }
+
+            .m-value {
+              color: #1e293b;
+            }
+          }
+        }
+      }
+
+      .paper-section {
+        padding: 20px 60px 20px 84px; // Extra left padding for sidebar bar
+        margin-bottom: 0;
+        border-bottom: 1px dashed #e5e7eb;
+
+        &.active-focus {
+          background: #fff;
+          border-left: 4px solid #1d4e89;
+          box-shadow: none;
+        }
+      }
+
+      .branded-paper-footer {
+        padding: 20px 60px 40px 84px;
+        border-bottom-left-radius: 4px;
+        border-bottom-right-radius: 4px;
+        margin-bottom: 60px;
+        border-top: 1px solid #ebf1f9;
+
+        img {
+          width: 100%;
+          height: auto;
+          display: block;
+        }
+      }
+
+      &.active-focus {
+        background: #fff;
+        border-left: 4px solid #1d4e89;
+        box-shadow: none;
+      }
+
+      .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+
+        h4 {
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          color: #1d4e89;
+          font-size: 0.85rem;
+          font-weight: 800;
+        }
+
+        .ai-controls {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+
+          .confidence-tag {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+
+            mat-icon {
+              font-size: 14px;
+              width: 14px;
+              height: 14px;
+            }
+
+            &.high {
+              background: #10b981;
+            }
+
+            &.med {
+              background: #f59e0b;
+            }
+
+            &.low {
+              background: #ef4444;
+            }
+          }
+        }
+      }
+
+      .editor-block {
+        min-height: 40px;
+        line-height: 1.6;
+        font-size: 1.1rem;
+        outline: none;
+        padding: 8px;
+        border-radius: 4px;
+        transition: background 0.2s;
+        position: relative;
+        color: #374151; // Darker gray for document text
+
+        &:focus {
+          background: rgba(29, 78, 137, 0.03); // Subtle brand blue tint
+        }
+
+        &.thinking {
+          opacity: 0.6;
+          pointer-events: none;
+        }
+
+        .placeholder {
+          color: #9ca3af;
+          font-style: italic;
+        }
+
+        .thinking-overlay {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          gap: 8px;
+          background: rgba(0, 0, 0, 0.2);
+          z-index: 2;
+
+          span {
+            font-size: 0.8rem;
+            font-weight: 600;
+          }
+        }
+      }
+    }
+  }
+}
+
+// --- Advisor Shelf ---
+.advisor-shelf {
+  height: 180px;
+  background: rgba(124, 58, 237, 0.05);
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  .insight-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      color: var(--accent-primary);
+    }
+
+    .auto-badge {
+      font-size: 0.65rem;
+      font-weight: 800;
+      background: var(--accent-primary);
+      color: white;
+      padding: 2px 8px;
+      border-radius: 10px;
+      text-transform: uppercase;
+    }
+  }
+
+  .insight-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    flex: 1;
+
+    .insight-col {
+      background: rgba(255, 255, 255, 0.03);
+      padding: 12px;
+      border-radius: 8px;
+      overflow-y: auto;
+
+      .label {
+        display: block;
+        font-size: 0.7rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+
+        &.error {
+          color: #ef4444;
+        }
+
+        &.warning {
+          color: #f59e0b;
+        }
+
+        &.info {
+          color: #3b82f6;
+        }
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 16px;
+        list-style: square;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+      }
+    }
+  }
+}

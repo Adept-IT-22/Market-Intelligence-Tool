@@ -1,0 +1,226 @@
+<app-base-layout>
+  <div class="studio-container" *ngIf="state() as s">
+    <!-- 1. HEADER / TOOLBAR -->
+    <header class="studio-header glass">
+      <div class="brand">
+        <img [src]="brandLogo" class="site-logo" alt="Adept Logo">
+        <div class="v-divider"></div>
+        <div class="title-group">
+          <h1>Adept Studio</h1>
+          <span class="report-badge">
+            <select [ngModel]="selectedType()" (ngModelChange)="loadSchema($event)" class="type-select">
+              <option *ngFor="let t of reportTypes" [value]="t.id">{{t.name}}</option>
+            </select>
+          </span>
+        </div>
+      </div>
+      
+      <div class="actions">
+        <button mat-button class="btn-secondary" (click)="reportService.generateReport(selectedType(), {})" [disabled]="s.isGenerating">
+          <mat-icon>{{ s.isGenerating ? 'sync' : 'bolt' }}</mat-icon>
+          {{ s.isGenerating ? 'Generating...' : 'Full Synthesis' }}
+        </button>
+        <button mat-flat-button class="btn-primary" (click)="exportReport()">
+          <mat-icon>file_download</mat-icon> Export DOCX
+        </button>
+      </div>
+    </header>
+
+    <div class="studio-main">
+      <!-- 2. LEFT PANE: Structure & Inputs -->
+      <aside class="left-pane glass">
+        <div class="stepper">
+          <div *ngFor="let section of s.sections; let i = index" 
+               class="step" 
+               [class.active]="activeSectionIndex() === i"
+               (click)="scrollToSection(i)">
+            <div class="step-num">{{ i + 1 }}</div>
+            <span class="step-title">{{ section.title }}</span>
+            <mat-icon *ngIf="section.isEdited" class="edited-tag">edit_note</mat-icon>
+          </div>
+        </div>
+
+        <div class="form-content">
+          <div class="section-card" *ngIf="s.sections[activeSectionIndex()] as section">
+            <h3>{{ section.title }}</h3>
+            <p class="subtitle">Complete the fields below to synthesize this section.</p>
+            
+            <div class="questions">
+              <!-- Dynamic Questions based on Schema -->
+              <ng-container *ngFor="let q of sectionSchema()[activeSectionIndex()]?.questions">
+                <mat-form-field appearance="outline" class="full-width" *ngIf="q.type === 'text' || q.type === 'number'">
+                  <mat-label>{{ q.label }}</mat-label>
+                  <input matInput [type]="q.type" [(ngModel)]="section.formData[q.id]" (ngModelChange)="onFormChange(section.id, q.id, $event)">
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="full-width" *ngIf="q.type === 'textarea' || q.type === 'list'">
+                  <mat-label>{{ q.label }}</mat-label>
+                  <textarea matInput [rows]="q.type === 'list' ? 4 : 8" [(ngModel)]="section.formData[q.id]" (ngModelChange)="onFormChange(section.id, q.id, $event)"></textarea>
+                  <mat-hint *ngIf="q.type === 'list'">Bullet points are automatically handled by AI.</mat-hint>
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="full-width" *ngIf="q.type === 'date'">
+                  <mat-label>{{ q.label }}</mat-label>
+                  <input matInput type="date" [(ngModel)]="section.formData[q.id]" (ngModelChange)="onFormChange(section.id, q.id, $event)">
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="full-width" *ngIf="q.type === 'dropdown'">
+                  <mat-label>{{ q.label }}</mat-label>
+                  <mat-select [(ngModel)]="section.formData[q.id]" (ngModelChange)="onFormChange(section.id, q.id, $event)">
+                    <mat-option *ngFor="let opt of q.options" [value]="opt">{{opt}}</mat-option>
+                  </mat-select>
+                </mat-form-field>
+              </ng-container>
+
+              <div class="no-questions" *ngIf="!sectionSchema()[activeSectionIndex()]?.questions?.length">
+                <p>No primary inputs required for this section. AI will synthesize from retrieved data.</p>
+              </div>
+            </div>
+
+            <div class="section-footer">
+              <button mat-button (click)="nextSection()" *ngIf="activeSectionIndex() < s.sections.length - 1">
+                Next Section <mat-icon>arrow_forward</mat-icon>
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 3. RIGHT PANE: Synthesis & Preview -->
+      <main class="right-pane">
+        <div class="paper glass">
+          <div class="paper-header">
+            <div class="preview-badge">
+              <mat-icon>visibility</mat-icon>
+              <span>Live Draft Preview</span>
+            </div>
+            <div class="editing-state" *ngIf="activeSectionIndex() >= 0">
+              Editing: <strong>{{ s.sections[activeSectionIndex()].title }}</strong>
+            </div>
+          </div>
+          
+          <div class="document-scroller">
+            <!-- OFFICIAL SIDEBAR DECORATION -->
+            <img [src]="brandSidebar" class="doc-sidebar-bar" alt="">
+
+            <!-- 3.1 BRANDED DOCUMENT HEADER -->
+            <div class="branded-paper-header">
+              <div class="brand-top">
+                <img [src]="brandLogo" class="preview-logo" alt="Adept Logo">
+                <div class="brand-text">
+                  <h2 class="org-name">ADEPT TECHNOLOGIES</h2>
+                  <p class="tagline">Official Strategic Report</p>
+                </div>
+              </div>
+              
+              <div class="doc-metadata">
+                <!-- Dynamic Metadata from Section 0 (Metadata) -->
+                <ng-container *ngIf="s.sections[0] as meta">
+                  <div class="meta-row" *ngFor="let q of sectionSchema()[0]?.questions">
+                    <span class="m-label">{{ q.label }}:</span>
+                    <span class="m-value">{{ meta.formData[q.id] || '—' }}</span>
+                  </div>
+                </ng-container>
+              </div>
+            </div>
+
+            <div *ngFor="let section of s.sections; let i = index" 
+                 class="paper-section" 
+                 [id]="'render-' + section.id"
+                 [class.active-focus]="activeSectionIndex() === i">
+              <div class="section-header">
+                <h4>{{ section.title }}</h4>
+                <!-- Section AI Controls -->
+                <div class="ai-controls" *ngIf="section.aiDraft || section.userOverride">
+                  <button mat-icon-button [matMenuTriggerFor]="refineMenu" matTooltip="Refine with AI">
+                    <mat-icon>magic_button</mat-icon>
+                  </button>
+                  <mat-menu #refineMenu="matMenu">
+                    <button mat-menu-item (click)="refine(section.id, 'make_executive')">
+                      <mat-icon>trending_up</mat-icon>
+                      <span>Make Executive</span>
+                    </button>
+                    <button mat-menu-item (click)="refine(section.id, 'clarify')">
+                      <mat-icon>auto_fix_high</mat-icon>
+                      <span>Improve Clarity</span>
+                    </button>
+                    <button mat-menu-item (click)="refine(section.id, 'shorten')">
+                      <mat-icon>align_vertical_bottom</mat-icon>
+                      <span>Shorten</span>
+                    </button>
+                  </mat-menu>
+                  
+                  <!-- Confidence & Source Anchors -->
+                  <div class="confidence-tag" [ngClass]="section.confidence.level.toLowerCase()" [matTooltip]="section.confidence.reason" (click)="setActiveSection(i)">
+                    <mat-icon>verified</mat-icon>
+                    {{ section.confidence.level }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- THE EDITOR (Controlled ContentEditable) -->
+              <div class="editor-block" 
+                   contenteditable="true"
+                   (input)="onTextEdit(section.id, $event)"
+                   (focus)="setActiveSection(i)"
+                   [class.thinking]="section.isThinking">
+                {{ section.userOverride ?? section.aiDraft }}
+                <div *ngIf="section.isThinking" class="thinking-overlay">
+                  <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+                  <span>Adept AI is thinking...</span>
+                </div>
+                <div *ngIf="!section.aiDraft && !section.userOverride" class="placeholder">
+                  Complete '{{ section.title }}' draft will appear here...
+                </div>
+              </div>
+              
+              <mat-divider></mat-divider>
+            </div>
+
+            <div class="branded-paper-footer">
+              <img [src]="brandFooter" alt="Adept Footer">
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. ADVISOR OVERLAY (Auto-Insights) -->
+        <div class="advisor-shelf glass" *ngIf="s.analysis">
+          <div class="insight-header">
+            <div class="title-group">
+              <mat-icon>psychology</mat-icon>
+              <span>Adept Strategic Advisor</span>
+            </div>
+            <span class="auto-badge">AI Analysis</span>
+          </div>
+          <div class="insight-grid">
+            <div class="insight-col" *ngIf="s.analysis.inconsistencies.length">
+              <span class="label error">Inconsistencies</span>
+              <ul><li *ngFor="let item of s.analysis.inconsistencies">{{ item }}</li></ul>
+            </div>
+            <div class="insight-col" *ngIf="s.analysis.risks.length">
+              <span class="label warning">Risks Detected</span>
+              <ul><li *ngFor="let item of s.analysis.risks">{{ item }}</li></ul>
+            </div>
+            <div class="insight-col" *ngIf="s.analysis.suggestions.length">
+              <span class="label info">Suggestions</span>
+              <ul><li *ngFor="let item of s.analysis.suggestions">{{ item }}</li></ul>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Loading State -->
+  <div class="loading-full" *ngIf="!state() && !initError()">
+    <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+    <p>Initializing Studio Workspace...</p>
+  </div>
+
+  <!-- Error State -->
+  <div class="error-full" *ngIf="initError()">
+    <mat-icon color="warn">error</mat-icon>
+    <p>{{ initError() }}</p>
+    <button mat-raised-button (click)="ngOnInit()">Retry Initialization</button>
+  </div>
+</app-base-layout>
