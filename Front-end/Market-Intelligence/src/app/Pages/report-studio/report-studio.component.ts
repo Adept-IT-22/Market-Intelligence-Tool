@@ -47,7 +47,7 @@ export class ReportStudioComponent implements OnInit {
   public brandSidebar = '/adept_sidebar.png';
   public brandFooter = '/adept_footer.png';
   
-  public currentDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  public currentMonthYear = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long' }).toUpperCase();
   public projectTitle = 'Strategic Market Intelligence';
 
   public reportTypes = [

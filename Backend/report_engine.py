@@ -31,26 +31,29 @@ REPORT_TYPES = {
         "sections": [
             {
                 "id": "metadata",
-                "title": "Metadata",
+                "title": "Document Information",
                 "questions": [
                     {"id": "project_name", "label": "Project Name", "type": "text"},
+                    {"id": "report_by", "label": "Prepared By", "type": "text"},
                     {"id": "sprint_no", "label": "Sprint Number", "type": "number"},
-                    {"id": "start_date", "label": "Start Date", "type": "date"},
-                    {"id": "end_date", "label": "End Date", "type": "date"}
+                    {"id": "period", "label": "Reporting Period (Dates)", "type": "text"}
                 ]
             },
             {
                 "id": "status",
-                "title": "Overall Status",
+                "title": "Sprint Summary & Health",
                 "questions": [
-                    {"id": "status_rating", "label": "Health", "type": "dropdown", "options": ["On Track", "At Risk", "Delayed"]},
-                    {"id": "status_summary", "label": "Executive Summary", "type": "textarea"}
+                    {"id": "status_rating", "label": "Overall Status", "type": "dropdown", "options": ["Delayed", "On Track", "Ahead"]},
+                    {"id": "summary_text", "label": "High-Level Summary", "type": "textarea"},
+                    {"id": "timeline", "label": "Timeline (e.g. 4th - 15th Aug)", "type": "text"},
+                    {"id": "time_spent", "label": "Time Spent Total", "type": "text"},
+                    {"id": "what_next", "label": "What Next?", "type": "textarea"}
                 ],
                 "retrieval_query": "how to write executive summary adept status report standards"
             },
             {
                 "id": "progress",
-                "title": "Accomplishments",
+                "title": "Detailed Accomplishments",
                 "questions": [
                     {"id": "tasks_completed", "label": "What was achieved this sprint?", "type": "list"}
                 ],
@@ -66,7 +69,7 @@ REPORT_TYPES = {
             },
             {
                 "id": "next_steps",
-                "title": "Priorities for Next Sprint",
+                "title": "Sprint 4 Priorities",
                 "questions": [
                     {"id": "upcoming_tasks", "label": "Immediate Priorities", "type": "list"}
                 ],
@@ -85,9 +88,10 @@ REPORT_TYPES = {
         "sections": [
             {
                 "id": "metadata",
-                "title": "Metadata",
+                "title": "Document Information",
                 "questions": [
                     {"id": "campaign_name", "label": "Campaign Name", "type": "text"},
+                    {"id": "report_by", "label": "Prepared By", "type": "text"},
                     {"id": "period", "label": "Reporting Period", "type": "text"},
                     {"id": "target_audience", "label": "Target Audience", "type": "text"}
                 ]

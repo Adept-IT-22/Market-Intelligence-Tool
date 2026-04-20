@@ -103,24 +103,65 @@
             <!-- OFFICIAL SIDEBAR DECORATION -->
             <img [src]="brandSidebar" class="doc-sidebar-bar" alt="">
 
-            <!-- 3.1 BRANDED DOCUMENT HEADER -->
-            <div class="branded-paper-header">
-              <div class="brand-top">
-                <img [src]="brandLogo" class="preview-logo" alt="Adept Logo">
-                <div class="brand-text">
-                  <h2 class="org-name">ADEPT TECHNOLOGIES</h2>
-                  <p class="tagline">Official Strategic Report</p>
+            <!-- 3.1 COVER PAGE -->
+            <div class="doc-page cover-page">
+              <div class="cover-content">
+                <img [src]="brandLogo" class="cover-logo" alt="Adept Logo">
+                <h1 class="cover-title">{{ s.title.toUpperCase() }}</h1>
+                <p class="cover-date">{{ currentMonthYear }}</p>
+              </div>
+              <div class="branded-paper-footer">
+                <img [src]="brandFooter" alt="Adept Footer">
+              </div>
+            </div>
+
+            <!-- Page Break Simulation -->
+            <div class="page-break-line"><span>PAGE BREAK</span></div>
+
+            <!-- 3.2 TABLE OF CONTENTS -->
+            <div class="doc-page toc-page">
+              <h2 class="toc-title">TABLE OF CONTENTS</h2>
+              <div class="toc-list">
+                <div class="toc-item" *ngFor="let section of s.sections; let i = index" (click)="scrollToSection(i)">
+                   <span class="t-num">{{ i + 1 }}.</span>
+                   <span class="t-label">{{ section.title }}</span>
+                   <span class="t-dots"></span>
+                   <span class="t-page">{{ i + 3 }}</span>
                 </div>
               </div>
-              
-              <div class="doc-metadata">
-                <!-- Dynamic Metadata from Section 0 (Metadata) -->
-                <ng-container *ngIf="s.sections[0] as meta">
-                  <div class="meta-row" *ngFor="let q of sectionSchema()[0]?.questions">
-                    <span class="m-label">{{ q.label }}:</span>
-                    <span class="m-value">{{ meta.formData[q.id] || '—' }}</span>
-                  </div>
-                </ng-container>
+              <div class="branded-paper-footer">
+                <img [src]="brandFooter" alt="Adept Footer">
+              </div>
+            </div>
+
+            <!-- Page Break Simulation -->
+            <div class="page-break-line"><span>PAGE BREAK</span></div>
+
+            <!-- 3.3 CONTENT START -->
+            <div class="doc-page content-header">
+              <div class="underlined-header">
+                <h2>{{ s.title }}</h2>
+              </div>
+
+              <!-- Executive Summary Boxes (If Sprint) -->
+              <div class="summary-boxes" *ngIf="s.type === 'sprint'">
+                <!-- Orange Box -->
+                <div class="box orange-box">
+                  <h4>This Sprint's Summary:</h4>
+                  <ul>
+                    <li><strong>Status:</strong> <span [class.delayed]="s.sections[1].formData['status_rating'] === 'Delayed'">{{ s.sections[1].formData['status_rating'] || 'TBD' }}</span></li>
+                    <li><strong>Summary:</strong> {{ s.sections[1].formData['summary_text'] || 'Pending synthesis...' }}</li>
+                    <li><strong>Timeline:</strong> {{ s.sections[1].formData['timeline'] || '—' }}</li>
+                    <li><strong>Time Spent:</strong> {{ s.sections[1].formData['time_spent'] || '—' }}</li>
+                  </ul>
+                </div>
+                <!-- Teal Box -->
+                <div class="box teal-box">
+                  <h4>Project Info:</h4>
+                  <div class="info-row"><strong>Project:</strong> {{ s.sections[0].formData['project_name'] || '—' }}</div>
+                  <div class="info-row"><strong>Content:</strong> {{ s.title }}</div>
+                  <div class="info-row"><strong>By:</strong> {{ s.sections[0].formData['report_by'] || '—' }}</div>
+                </div>
               </div>
             </div>
 
