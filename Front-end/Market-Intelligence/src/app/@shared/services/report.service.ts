@@ -78,6 +78,33 @@ export class ReportService {
   }
 
   /**
+   * Calls AI to parse unstructured notes into structured form data.
+   */
+  autoFillFromNotes(type: string, raw_text: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/auto-fill`, { type, raw_text }).pipe(
+      tap((res: any) => {
+        if (res.success && this.stateSubject.value) {
+          const currentState = this.stateSubject.value;
+          const extracted = res.answers || {};
+          
+          const updatedSections = currentState.sections.map(s => {
+            const newFormData = { ...s.formData };
+            Object.keys(extracted).forEach(k => {
+              // Only overwrite if the AI actually extracted something meaningful
+              if (extracted[k] !== undefined && extracted[k] !== null && extracted[k] !== "") {
+                newFormData[k] = extracted[k];
+              }
+            });
+            return { ...s, formData: newFormData };
+          });
+          
+          this.stateSubject.next({ ...currentState, sections: updatedSections });
+        }
+      })
+    );
+  }
+
+  /**
    * Triggers full report generation.
    */
   generateReport(type: string, answers: any) {
@@ -196,11 +223,11 @@ export class ReportService {
     const state = this.stateSubject.value;
     if (!state) return null;
 
-    const data: any = {};
-    state.sections.forEach(s => {
-      data[s.id] = s.userOverride ?? s.aiDraft;
-    });
-
-    return this.http.post(`${this.apiUrl}/export`, { type: state.type, data: data }, { responseType: 'blob' });
+    // Send full sections list so the template has access to both Synthesis and raw Form Data
+    return this.http.post(`${this.apiUrl}/export`, { 
+      type: state.type, 
+      sections: state.sections,
+      title: state.title
+    }, { responseType: 'blob' });
   }
 }

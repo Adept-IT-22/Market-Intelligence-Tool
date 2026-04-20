@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
@@ -10,6 +10,9 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatDatepickerModule } from '@angular/material/datepicker';
+import { MatNativeDateModule } from '@angular/material/core';
 import { ReportService, ReportState, SectionState } from '../../@shared/services/report.service';
 import { BaseLayoutComponent } from '../../@shared/components/base-layout/base-layout.component';
 
@@ -27,8 +30,11 @@ import { BaseLayoutComponent } from '../../@shared/components/base-layout/base-l
     MatSelectModule,
     MatMenuModule,
     MatProgressBarModule,
+    MatProgressSpinnerModule,
     MatTooltipModule,
     MatDividerModule,
+    MatDatepickerModule,
+    MatNativeDateModule,
     BaseLayoutComponent
   ],
   templateUrl: './report-studio.component.html',
@@ -38,16 +44,41 @@ export class ReportStudioComponent implements OnInit {
   public reportService = inject(ReportService);
   
   public state = signal<ReportState | null>(null);
-  public sectionSchema = signal<any[]>([]); // Added to store questions/labels
+  public sectionSchema = signal<any[]>([]);  // Auto-Fill State
+  showAutoFill = signal<boolean>(false);
+  autoFillText = signal<string>('');
+  isAutoFilling = signal<boolean>(false);
+
+  // Resizing Advisor Shelf
+  public advisorHeight = signal(220);
+  private isResizing = false;
+  private startY = 0;
+  private startHeight = 0;
+
+  // Computed state derivations/labels
   public activeSectionIndex = signal(0);
   public initError = signal<string | null>(null);
+  public showPreview = signal(false);
   
   // Branding Configuration
   public brandLogo = '/adept_logo.jpg';
   public brandSidebar = '/adept_sidebar.png';
   public brandFooter = '/adept_footer.png';
   
-  public currentMonthYear = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long' }).toUpperCase();
+  public get currentMonthYear(): string {
+    const s = this.state();
+    if (s && s.sections && s.sections[0]) {
+      const fd = s.sections[0].formData || {};
+      const dateVal = fd['period'] || fd['week_of'] || fd['report_date'];
+      if (dateVal) {
+        const d = new Date(dateVal);
+        if (!isNaN(d.getTime())) {
+          return d.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase();
+        }
+      }
+    }
+    return new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase();
+  }
   public projectTitle = 'Strategic Market Intelligence';
 
   public reportTypes = [
@@ -106,8 +137,48 @@ export class ReportStudioComponent implements OnInit {
     this.reportService.generateReport(s.type, answers).subscribe();
   }
 
+  triggerAutoFill() {
+    const text = this.autoFillText();
+    const s = this.state();
+    if (!text.trim() || !s) return;
+
+    this.isAutoFilling.set(true);
+    this.reportService.autoFillFromNotes(s.type, text).subscribe({
+      next: () => {
+        this.isAutoFilling.set(false);
+        this.showAutoFill.set(false);
+        this.autoFillText.set('');
+      },
+      error: (err) => {
+        this.isAutoFilling.set(false);
+        console.error('AutoFill failed', err);
+      }
+    });
+  }
+
   refine(sectionId: string, action: string) {
     this.reportService.refineSection(sectionId, action)?.subscribe();
+  }
+
+  // --- Resizing Logic for Advisor Shelf ---
+  startResizing(event: MouseEvent) {
+    this.isResizing = true;
+    this.startY = event.clientY;
+    this.startHeight = this.advisorHeight();
+    event.preventDefault();
+  }
+
+  @HostListener('window:mousemove', ['$event'])
+  onMouseMove(event: MouseEvent) {
+    if (!this.isResizing) return;
+    const deltaY = this.startY - event.clientY;
+    const newHeight = Math.min(Math.max(this.startHeight + deltaY, 120), 600);
+    this.advisorHeight.set(newHeight);
+  }
+
+  @HostListener('window:mouseup')
+  onMouseUp() {
+    this.isResizing = false;
   }
 
   onTextEdit(sectionId: string, event: any) {
@@ -133,6 +204,16 @@ export class ReportStudioComponent implements OnInit {
     if (nextIndex < (this.state()?.sections.length || 0)) {
       this.scrollToSection(nextIndex);
     }
+  }
+
+  openPreview() {
+    this.showPreview.set(true);
+    document.body.style.overflow = 'hidden';
+  }
+
+  closePreview() {
+    this.showPreview.set(false);
+    document.body.style.overflow = '';
   }
 
   exportReport() {
@@ -166,5 +247,27 @@ export class ReportStudioComponent implements OnInit {
         }
       }, 0);
     }
+  }
+
+  getDisplayTitle(s: ReportState): string {
+    if (!s || !s.sections || !s.sections[0]) return '';
+    const formData = s.sections[0].formData || {};
+    return formData['project_name'] || formData['campaign_name'] || s.title;
+  }
+
+  getRoughNotes(section: SectionState): string {
+    if (!section || !section.formData) return '';
+    
+    // Convert the formData object into an array of strings, properly stringifying arrays (like bullet points) or objects, and filtering out empty values.
+    const values = Object.entries(section.formData).map(([k, v]) => {
+      // Exclude simple internal statuses like Dropdowns if they aren't the main content, 
+      // but easiest is just to combine all textual answers so the user sees *something* live.
+      if (!v) return null;
+      if (typeof v === 'string' && v.trim().length === 0) return null;
+      if (Array.isArray(v)) return v.join('\n');
+      return String(v);
+    }).filter(v => v !== null) as string[];
+
+    return values.join('\n\n');
   }
 }

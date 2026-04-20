@@ -36,7 +36,7 @@ REPORT_TYPES = {
                     {"id": "project_name", "label": "Project Name", "type": "text"},
                     {"id": "report_by", "label": "Prepared By", "type": "text"},
                     {"id": "sprint_no", "label": "Sprint Number", "type": "number"},
-                    {"id": "period", "label": "Reporting Period (Dates)", "type": "text"}
+                    {"id": "period", "label": "Reporting Date", "type": "date"}
                 ]
             },
             {
@@ -76,7 +76,7 @@ REPORT_TYPES = {
                 "retrieval_query": "adept future planning next steps delivery lifecycle"
             }
         ],
-        "docx_template": "Backend/report_templates/sprint_report.docx",
+        "docx_template": "report_templates/sprint_report.docx",
         "transformations": {
             "make_executive": "Rewrite this section for an executive audience.",
             "clarify": "Improve the clarity and flow.",
@@ -105,7 +105,7 @@ REPORT_TYPES = {
                 "retrieval_query": "marketing performance reporting standards campaign metrics"
             }
         ],
-        "docx_template": "Backend/report_templates/marketing_report.docx",
+        "docx_template": "report_templates/marketing_report.docx",
         "transformations": { "make_executive": "...", "clarify": "...", "shorten": "..." }
     },
     "weekly": {
@@ -128,7 +128,7 @@ REPORT_TYPES = {
                 "retrieval_query": "weekly reporting cadence highlights wins"
             }
         ],
-        "docx_template": "Backend/report_templates/weekly_report.docx",
+        "docx_template": "report_templates/weekly_report.docx",
         "transformations": { "make_executive": "...", "clarify": "...", "shorten": "..." }
     },
     "monthly": {
@@ -151,7 +151,7 @@ REPORT_TYPES = {
                 "retrieval_query": "monthly strategic report template gains strategy"
             }
         ],
-        "docx_template": "Backend/report_templates/monthly_report.docx",
+        "docx_template": "report_templates/monthly_report.docx",
         "transformations": { "make_executive": "...", "clarify": "...", "shorten": "..." }
     }
 }
@@ -168,6 +168,15 @@ class ReportAutomationEngine:
             self._qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
         return self._qdrant
 
+
+    def _sanitize_markdown(self, text):
+        if not text: return ""
+        import re
+        # Remove bold markers
+        text = text.replace("**", "").replace("__", "")
+        # Remove hashtag headers (all levels)
+        text = re.sub(r'#+\s*', '', text)
+        return text.strip()
 
     def generate_report_draft(self, report_type, answers):
         """
@@ -215,20 +224,96 @@ class ReportAutomationEngine:
             3. Be concise and actionable.
             4. Do NOT include placeholders; if data is missing, write a polite summary of what we know.
             
-            Output ONLY the section text. No intros or outros.
+            --- CRITICAL FORMATTING RULES ---
+            - Absolutely NO Markdown formatting.
+            - NO asterisks (**), NO hashtags (#), NO bolding, NO italics.
+            - Output ONLY raw, professional paragraph text.
+            - Do NOT include the section title.
+            - No intros or outros.
             """
             
             logger.info(f"Generating section: {section['title']}")
             generated_text = call_gemini_sync(prompt)
             
+            # Sanitize to be 100% sure no markdown leaks through
+            clean_text = self._sanitize_markdown(generated_text)
+            
             final_sections[section_id] = {
-                "aiDraft": generated_text,
+                "aiDraft": clean_text,
                 "userOverride": None,
                 "isEdited": False,
                 "confidence": context['confidence']
             }
 
         return final_sections
+
+    def parse_unstructured_notes(self, report_type, raw_text):
+        """
+        Takes raw unstructured text (e.g. from ChatGPT or a meeting transcript),
+        and maps it to the schema's dictionary structure using Gemini AI mapping.
+        """
+        if report_type not in REPORT_TYPES:
+            raise ValueError(f"Unknown report type: {report_type}")
+
+        config = REPORT_TYPES[report_type]
+        
+        # Flatten schema to give Gemini clarity on what answers we need
+        questions_schema = {}
+        for section in config['sections']:
+            for q in section.get('questions', []):
+                val_type = q.get('type')
+                if val_type == 'dropdown':
+                    expected_format = f"Enum: {q.get('options', [])}"
+                else:
+                    expected_format = val_type
+                
+                questions_schema[q['id']] = {
+                    "question": q['label'],
+                    "expected_type": expected_format
+                }
+                
+        # Ask Gemini to extract data strictly into a JSON dictionary
+        from agent_manager import call_gemini_sync
+        prompt = f"""
+        You are an intelligent data extraction tool.
+        Your task is to read the raw notes provided below and extract the relevant
+        information to answer specific schema questions.
+
+        If a piece of information is simply NOT FOUND in the raw text, return an empty string "" for that key. Do not invent data.
+
+        SCHEMA TO FILL:
+        {json.dumps(questions_schema, indent=2)}
+
+        RAW NOTES (User provided):
+        \"\"\"{raw_text}\"\"\"
+
+        Return ONLY a raw JSON dictionary mapping exactly the keys from the SCHEMA to the extracted answers. No backticks, no markdown, just the JSON string starting with {{ and ending with }}.
+        """
+        
+        logger.info(f"Extracting structured answers for {report_type} via Auto-Fill feature.")
+        generated_json_text = call_gemini_sync(prompt)
+        
+        try:
+            # Clean up the response in case Gemini added markdown fences
+            clean_text = generated_json_text.strip()
+            if clean_text.startswith("```json"):
+                clean_text = clean_text[7:]
+            if clean_text.startswith("```"):
+                clean_text = clean_text[3:]
+            if clean_text.endswith("```"):
+                clean_text = clean_text[:-3]
+
+            result_dict = json.loads(clean_text.strip())
+            
+            # Sanitize any textual outputs in the auto-fill too
+            for k, v in result_dict.items():
+                if isinstance(v, str):
+                    result_dict[k] = self._sanitize_markdown(v)
+                    
+            return result_dict
+        except Exception as e:
+            logger.error(f"Failed to parse Auto-Fill JSON: {e} \nRaw output: {generated_json_text}")
+            raise ValueError("Failed to parse AI structured response.")
 
     def refine_section(self, report_type, section_id, action, current_text, answers):
         """
@@ -262,7 +347,7 @@ class ReportAutomationEngine:
         
         from agent_manager import call_gemini_sync
         refined_text = call_gemini_sync(prompt)
-        return refined_text
+        return self._sanitize_markdown(refined_text)
 
     def analyze_report(self, report_type, sections):
         """
@@ -343,20 +428,42 @@ class ReportAutomationEngine:
             "confidence": {"level": level, "reason": reason}
         }
 
-    def export_to_docx(self, report_type, data, output_path):
+    def export_to_docx(self, report_type, section_list, output_path, report_title=""):
         """
         Fills a DOCX template using docxtpl.
+        Matches the complex dictionary-based expectations of the Word templates.
         """
-        template_path = REPORT_TYPES[report_type]['docx_template']
+        config = REPORT_TYPES[report_type]
+        template_path = config['docx_template']
         if not os.path.exists(template_path):
-            # Create a placeholder if it doesn't exist
-            logger.warning(f"Template not found at {template_path}. Falling back to basic assembly.")
+            logger.warning(f"Template not found at {template_path}.")
             return False
 
-        doc = DocxTemplate(template_path)
-        doc.render(data)
-        doc.save(output_path)
-        return True
+        # 1. Transform list back to dictionary for template direct-lookups
+        sections_dict = {s['id']: s for s in section_list}
+        
+        # 2. Extract cover page metadata (usually from 'metadata' section)
+        metadata_sec = sections_dict.get('metadata', {})
+        form_data = metadata_sec.get('formData', {})
+        
+        # 3. Build the context matching word/document.xml tags
+        rich_context = {
+            "currentDate": datetime.now().strftime("%d %B %Y").upper(),
+            "title": report_title or config['title'],
+            "sections": sections_dict
+        }
+        
+        # Sprinkle in flat metadata fields for easy access (e.g. {{ project_name }})
+        rich_context.update(form_data)
+
+        try:
+            doc = DocxTemplate(template_path)
+            doc.render(rich_context)
+            doc.save(output_path)
+            return True
+        except Exception as e:
+            logger.error(f"Docx render error: {e}")
+            raise e
 
 # Singleton instance
 engine = ReportAutomationEngine()

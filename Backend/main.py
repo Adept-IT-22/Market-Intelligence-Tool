@@ -592,6 +592,27 @@ def get_report_questions(report_type):
         return jsonify({"error": "Unknown report type"}), 404
     return jsonify({"schema": REPORT_TYPES[report_type]["sections"]}), 200
 
+@app.route('/reports/auto-fill', methods=['POST'])
+@jwt_optional
+def generate_report_autofill():
+    """
+    Parses unstructured notes to fill out the form implicitly.
+    Expects: { "type": "sprint", "raw_text": "..." }
+    """
+    data = request.json
+    report_type = data.get("type")
+    raw_text = data.get("raw_text")
+
+    if not report_type or not raw_text:
+        return jsonify({"error": "Missing report_type or raw_text"}), 400
+
+    try:
+        filled_data = engine.parse_unstructured_notes(report_type, raw_text)
+        return jsonify({"answers": filled_data, "success": True}), 200
+    except Exception as e:
+        logger.error(f"Auto-fill failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/reports/generate', methods=['POST'])
 @jwt_optional
 def generate_report_draft():
@@ -665,7 +686,8 @@ def export_report_docx():
     """
     data = request.json
     report_type = data.get("type")
-    report_data = data.get("data", {})
+    sections = data.get("sections", [])
+    report_title = data.get("title", "")
     project_id = data.get("project_id")
     
     if not report_type or report_type not in REPORT_TYPES:
@@ -678,7 +700,7 @@ def export_report_docx():
     
     try:
         # 2. Fill Template
-        success = engine.export_to_docx(report_type, report_data, temp_path)
+        success = engine.export_to_docx(report_type, sections, temp_path, report_title)
         if not success:
             return jsonify({"error": "Failed to generate DOCX. Template missing?"}), 500
             
