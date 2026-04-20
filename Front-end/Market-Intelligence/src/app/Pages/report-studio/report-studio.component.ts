@@ -115,15 +115,38 @@ export class ReportStudioComponent implements OnInit {
     this.reportService.updateUserOverride(sectionId, text);
   }
 
-  export() {
-    this.reportService.exportReport()?.subscribe(blob => {
-      if (blob) {
+  // --- Navigation & UI ---
+
+  scrollToSection(index: number) {
+    this.activeSectionIndex.set(index);
+    const section = this.state()?.sections[index];
+    if (section) {
+      const el = document.getElementById(`render-${section.id}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  }
+
+  nextSection() {
+    const nextIndex = this.activeSectionIndex() + 1;
+    if (nextIndex < (this.state()?.sections.length || 0)) {
+      this.scrollToSection(nextIndex);
+    }
+  }
+
+  exportReport() {
+    this.reportService.exportReport().subscribe({
+      next: (blob: Blob) => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        const filename = `Report_${new Date().getTime()}.docx`;
-        a.download = filename;
+        a.download = `Report_${this.selectedType()}_${new Date().toISOString().split('T')[0]}.docx`;
         a.click();
+        window.URL.revokeObjectURL(url);
+      },
+      error: (err) => {
+        console.error('Export failed:', err);
       }
     });
   }
