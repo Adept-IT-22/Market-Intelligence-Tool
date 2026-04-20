@@ -21,39 +21,71 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 24px;
-  min-height: 72px;
+  padding: 8px 16px;
+  min-height: 64px;
+  flex-shrink: 0;
 
   .brand {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
 
-    mat-icon {
-      color: var(--accent-primary);
-      filter: drop-shadow(0 0 8px var(--accent-primary));
+    .site-logo {
+      height: 48px;
+      width: auto;
+      object-fit: contain;
     }
 
-    .adept-logo {
-      font-size: 1.4rem;
-      font-weight: 700;
-      font-family: 'Outfit', sans-serif;
-      background: var(--accent-gradient);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+    .v-divider {
+      width: 1px;
+      height: 32px;
+      background: var(--glass-border);
     }
 
-    .report-title {
-      color: var(--text-muted);
-      font-size: 0.9rem;
-      padding-left: 12px;
-      border-left: 1px solid var(--border-color);
+    .title-group {
+      display: flex;
+      flex-direction: column;
+      
+      h1 {
+        font-family: 'Outfit', sans-serif;
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin: 0;
+        color: var(--text-primary);
+      }
+
+      .report-badge {
+        .type-select {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          font-size: 0.8rem;
+          cursor: pointer;
+          font-weight: 500;
+          outline: none;
+          padding: 0;
+          
+          &:hover { color: var(--accent-primary); }
+        }
+      }
     }
   }
 
   .actions {
     display: flex;
     gap: 12px;
+
+    .btn-secondary {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      color: var(--text-primary);
+    }
+
+    .btn-primary {
+      background: var(--accent-gradient);
+      color: white;
+      box-shadow: 0 4px 15px rgba(224, 78, 110, 0.3);
+    }
   }
 }
 

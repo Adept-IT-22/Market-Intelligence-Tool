@@ -136,7 +136,10 @@ export class ReportStudioComponent implements OnInit {
   }
 
   exportReport() {
-    this.reportService.exportReport().subscribe({
+    const obs = this.reportService.exportReport();
+    if (!obs) return;
+
+    obs.subscribe({
       next: (blob: Blob) => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
