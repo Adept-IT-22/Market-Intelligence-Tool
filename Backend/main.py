@@ -593,7 +593,7 @@ def get_report_questions(report_type):
     return jsonify({"schema": REPORT_TYPES[report_type]["sections"]}), 200
 
 @app.route('/reports/auto-fill', methods=['POST'])
-@jwt_optional
+@jwt_required
 def generate_report_autofill():
     """
     Parses unstructured notes to fill out the form implicitly.
@@ -614,7 +614,7 @@ def generate_report_autofill():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/reports/generate', methods=['POST'])
-@jwt_optional
+@jwt_required
 def generate_report_draft():
     """
     Generate a section-by-section draft from wizard answers.
@@ -635,7 +635,7 @@ def generate_report_draft():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/reports/refine', methods=['POST'])
-@jwt_optional
+@jwt_required
 def refine_report_section():
     """
     Refine a specific section using a targeted action (Executive, Clarify, Shorten).
@@ -658,7 +658,7 @@ def refine_report_section():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/reports/analyze', methods=['POST'])
-@jwt_optional
+@jwt_required
 def analyze_report_consistency():
     """
     Analyze the full report for inconsistencies, risks, and suggestions.
@@ -678,7 +678,7 @@ def analyze_report_consistency():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/reports/export', methods=['POST'])
-@jwt_optional
+@jwt_required
 def export_report_docx():
     """
     Finalize and export a report to DOCX.
@@ -693,9 +693,13 @@ def export_report_docx():
     if not report_type or report_type not in REPORT_TYPES:
         return jsonify({"error": "Invalid report type"}), 400
 
+    import uuid
+    from flask import send_file, after_this_request
+
     # 1. Generate local filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    filename = f"{timestamp}_{REPORT_TYPES[report_type]['title'].replace(' ', '_')}.docx"
+    unique_id = uuid.uuid4().hex[:8]
+    filename = f"{timestamp}_{unique_id}_{REPORT_TYPES[report_type]['title'].replace(' ', '_')}.docx"
     temp_path = os.path.join(UPLOAD_FOLDER, filename)
     
     try:
@@ -712,8 +716,16 @@ def export_report_docx():
             # but for now we'll just return the file.
             pass
             
-        from flask import send_file
-        return send_file(temp_path, as_attachment=True, download_name=filename)
+        @after_this_request
+        def remove_file(response):
+            try:
+                os.remove(temp_path)
+            except Exception as e:
+                logger.error(f"Error removing or closing downloaded file handle: {e}")
+            return response
+            
+        download_name = f"{timestamp}_{REPORT_TYPES[report_type]['title'].replace(' ', '_')}.docx"
+        return send_file(temp_path, as_attachment=True, download_name=download_name)
         
     except Exception as e:
         logger.error(f"Export failed: {e}")

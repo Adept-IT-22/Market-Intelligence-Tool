@@ -5,6 +5,12 @@ from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
 import os
 
+# Base path relative to where this script is located
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEMPLATE_DIR = os.path.join(BASE_DIR, "report_templates")
+os.makedirs(TEMPLATE_DIR, exist_ok=True)
+ASSETS_DIR = os.path.join(TEMPLATE_DIR, "assets")
+
 def set_cell_background(cell, fill, color=None, val=None):
     """
     @param cell:  docx.table._Cell object
@@ -24,7 +30,7 @@ def create_branded_template(report_key, title):
     section.bottom_margin = Inches(1.0)
 
     # Logo
-    logo_path = os.path.join("report_templates", "assets", "adept_logo.jpg")
+    logo_path = os.path.join(ASSETS_DIR, "adept_logo.jpg")
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     if os.path.exists(logo_path):
@@ -51,7 +57,7 @@ def create_branded_template(report_key, title):
     run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
     # Footer on Cover
-    footer_img_path = os.path.join("report_templates", "assets", "adept_footer.png")
+    footer_img_path = os.path.join(ASSETS_DIR, "adept_footer.png")
     if os.path.exists(footer_img_path):
         # We'll put it in the footer of this section
         footer = section.footer
@@ -130,7 +136,7 @@ def create_branded_template(report_key, title):
     run.font.color.rgb = RGBColor(0x1D, 0x4E, 0x89)
     
     # Section Content
-    doc.add_paragraph("{{ section.aiDraft if section.aiDraft else section.userOverride }}")
+    doc.add_paragraph("{{ section.userOverride if section.userOverride else section.aiDraft }}")
     
     doc.add_paragraph("\n")
     doc.add_paragraph("{% endif %}")
@@ -138,7 +144,7 @@ def create_branded_template(report_key, title):
 
     # Save
     filename = f"{report_key}_report.docx"
-    output_path = os.path.join("report_templates", filename)
+    output_path = os.path.join(TEMPLATE_DIR, filename)
     doc.save(output_path)
     print(f"Template saved: {output_path}")
 

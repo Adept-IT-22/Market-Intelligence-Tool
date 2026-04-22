@@ -106,7 +106,11 @@ REPORT_TYPES = {
             }
         ],
         "docx_template": "report_templates/marketing_report.docx",
-        "transformations": { "make_executive": "...", "clarify": "...", "shorten": "..." }
+        "transformations": {
+            "make_executive": "Rewrite this section for an executive audience, highlighting key metrics.",
+            "clarify": "Improve the clarity and flow of these performance points.",
+            "shorten": "Condense this performance report significantly."
+        }
     },
     "weekly": {
         "title": "Weekly Activity Report",
@@ -129,7 +133,11 @@ REPORT_TYPES = {
             }
         ],
         "docx_template": "report_templates/weekly_report.docx",
-        "transformations": { "make_executive": "...", "clarify": "...", "shorten": "..." }
+        "transformations": {
+            "make_executive": "Rewrite this weekly highlights section for an executive audience.",
+            "clarify": "Improve the clarity of these weekly activities.",
+            "shorten": "Condense the weekly wins significantly."
+        }
     },
     "monthly": {
         "title": "Monthly Strategic Overview",
@@ -152,7 +160,11 @@ REPORT_TYPES = {
             }
         ],
         "docx_template": "report_templates/monthly_report.docx",
-        "transformations": { "make_executive": "...", "clarify": "...", "shorten": "..." }
+        "transformations": {
+            "make_executive": "Rewrite this strategic overview for an executive audience, focusing on impact.",
+            "clarify": "Improve the clarity and flow of these strategic gains.",
+            "shorten": "Condense this monthly strategic summary significantly."
+        }
     }
 }
 
@@ -174,8 +186,8 @@ class ReportAutomationEngine:
         import re
         # Remove bold markers
         text = text.replace("**", "").replace("__", "")
-        # Remove hashtag headers (all levels)
-        text = re.sub(r'#+\s*', '', text)
+        # Remove Markdown headers (levels 1-6) only at the start of lines
+        text = re.sub(r'^\s*#{1,6}\s+', '', text, flags=re.MULTILINE)
         return text.strip()
 
     def generate_report_draft(self, report_type, answers):
@@ -193,8 +205,18 @@ class ReportAutomationEngine:
             section_id = section['id']
             if section_id == 'metadata':
                 # No generation needed for metadata, just pass through
-                for q in section['questions']:
-                    final_sections[q['id']] = answers.get(q['id'], "")
+                # Keep metadata under the section id so the returned dict remains consistently keyed
+                metadata_answers = {
+                    q['id']: answers.get(q['id'], "")
+                    for q in section['questions']
+                }
+                final_sections[section_id] = {
+                    "aiDraft": "",
+                    "userOverride": None,
+                    "isEdited": False,
+                    "confidence": {"level": "High", "reason": "System Generated"},
+                    "answers": metadata_answers
+                }
                 continue
 
             # Fetch context for this section
@@ -324,6 +346,8 @@ class ReportAutomationEngine:
 
         transformation_instr = REPORT_TYPES[report_type]["transformations"][action]
         section_meta = next((s for s in REPORT_TYPES[report_type]["sections"] if s["id"] == section_id), None)
+        if not section_meta:
+            raise ValueError(f"Section {section_id} not found in report type {report_type}")
         
         # Retrieve context again (or we could pass it from frontend)
         context = self.retrieve_filtered_context(section_meta.get('retrieval_query', section_id), doc_type="guideline")

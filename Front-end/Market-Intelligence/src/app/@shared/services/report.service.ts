@@ -115,8 +115,9 @@ export class ReportService {
 
     return this.http.post(`${this.apiUrl}/generate`, { type, answers }).pipe(
       tap((res: any) => {
-        if (res.success && currentState) {
-          const updatedSections = currentState.sections.map(s => {
+        const latestState = this.stateSubject.value;
+        if (res.success && latestState) {
+          const updatedSections = latestState.sections.map(s => {
             const draftData = res.draft[s.id];
             if (draftData) {
               return {
@@ -129,13 +130,14 @@ export class ReportService {
             }
             return s;
           });
-          this.stateSubject.next({ ...currentState, sections: updatedSections, isGenerating: false });
+          this.stateSubject.next({ ...latestState, sections: updatedSections, isGenerating: false });
           this.analyzeReport(); // Trigger analysis automatically
         }
       }),
       finalize(() => {
-        if (this.stateSubject.value) {
-          this.stateSubject.next({ ...this.stateSubject.value, isGenerating: false });
+        const latestState = this.stateSubject.value;
+        if (latestState) {
+          this.stateSubject.next({ ...latestState, isGenerating: false });
         }
       })
     );
@@ -165,19 +167,24 @@ export class ReportService {
 
     return this.http.post(`${this.apiUrl}/refine`, payload).pipe(
       tap((res: any) => {
-        if (res.success) {
-          const finalSections = state.sections.map(s => {
+        const latestState = this.stateSubject.value;
+        if (res.success && latestState) {
+          const finalSections = latestState.sections.map(s => {
             if (s.id === sectionId) {
               return { ...s, aiDraft: res.refined_text, userOverride: null, isEdited: false, isThinking: false };
             }
             return s;
           });
-          this.stateSubject.next({ ...state, sections: finalSections });
+          this.stateSubject.next({ ...latestState, sections: finalSections });
         }
       }),
       finalize(() => {
-        const resetSections = this.stateSubject.value?.sections.map(s => ({ ...s, isThinking: false })) || [];
-        this.stateSubject.next({ ...this.stateSubject.value!, sections: resetSections });
+        const latestState = this.stateSubject.value;
+        if (!latestState) return;
+        const resetSections = latestState.sections.map(s =>
+          s.id === sectionId ? { ...s, isThinking: false } : s
+        );
+        this.stateSubject.next({ ...latestState, sections: resetSections });
       })
     );
   }
@@ -216,6 +223,25 @@ export class ReportService {
       });
       this.stateSubject.next({ ...state, sections: updatedSections });
       // Debounced auto-save could go here
+    }
+  }
+
+  updateSectionForm(sectionId: string, field: string, value: any) {
+    const state = this.stateSubject.value;
+    if (state) {
+      const updatedSections = state.sections.map(s => {
+        if (s.id === sectionId) {
+          return {
+            ...s,
+            formData: {
+              ...s.formData,
+              [field]: value
+            }
+          };
+        }
+        return s;
+      });
+      this.stateSubject.next({ ...state, sections: updatedSections });
     }
   }
 

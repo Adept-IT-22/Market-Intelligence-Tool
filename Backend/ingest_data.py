@@ -482,7 +482,7 @@ class DataIngester:
                 logger.warning(f"No text or insights extracted from image: {file_path}")
                 return
 
-            # 3. Store in Qdrant/SQL/ES
+            # 3. Store in Qdrant and the SQLite routing table
             self._upsert_text_chunks(text, file_path, master_id, routing_table_name, sectors, department, "Image Analysis")
             self.conn.commit()
             logger.info(f"Image analysis complete for: {file_path}")
@@ -521,8 +521,9 @@ class DataIngester:
             )
             
             # 2. Insert into SQL Routing Table
+            table_name_safe = self._validate_table_name(routing_table_name)
             self.cursor.execute(f"""
-                INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, Department, qdrant_source, qdrant_point_id)
+                INSERT INTO {table_name_safe} (master_id, Title, Datatype, Sectors, Department, qdrant_source, qdrant_point_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (master_id, f"{title_prefix} Part {k+1}", "Text/Hybrid", sectors, department, source, point_id))
         

@@ -6,6 +6,10 @@ from datetime import datetime
 # Add the Backend directory to path so we can import DataIngester
 sys.path.append(os.path.join(os.getcwd(), "Backend"))
 from ingest_data import DataIngester
+from docx import Document
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DOCS_DIR = os.path.join(BASE_DIR, "docs")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,19 +19,19 @@ def ingest_adept_knowledge():
     
     docs = [
         {
-            "path": r"C:\Users\imain\Downloads\Innovation & Delivery Best Practice Guide.docx",
+            "path": os.path.join(DOCS_DIR, "Innovation & Delivery Best Practice Guide.docx"),
             "title": "Adept Best Practice Guide",
             "doc_type": "guideline",
             "section": "Best Practice"
         },
         {
-            "path": r"C:\Users\imain\Downloads\202604-Rec-Adept Footer.docx",
+            "path": os.path.join(DOCS_DIR, "202604-Rec-Adept Footer.docx"),
             "title": "Adept Branding Footer",
             "doc_type": "template",
             "section": "Branding"
         },
         {
-            "path": r"C:\Users\imain\Downloads\Adept Delivery Playbook v0_1.docx",
+            "path": os.path.join(DOCS_DIR, "Adept Delivery Playbook v0_1.docx"),
             "title": "Adept Delivery Playbook",
             "doc_type": "logic",
             "section": "Delivery Lifecycle"
@@ -74,7 +78,7 @@ def ingest_adept_knowledge():
             # We'll temporarily override the _upsert_text_chunks behavior to pass our special metadata
             # by wrapping the call or using the new parameters we added.
             
-            text = ingester._extract_text_from_docx(doc["path"])
+            text = ingester._extract_docx_text(Document(doc["path"]))
             if text:
                 ingester._upsert_text_chunks(
                     text=text,

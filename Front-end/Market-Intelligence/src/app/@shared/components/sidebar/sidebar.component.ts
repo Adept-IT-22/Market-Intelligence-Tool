@@ -8,11 +8,11 @@ import { FormsModule } from '@angular/forms';
 
 import { UiService } from '../../services/ui.service';
 
-import { RouterLink } from '@angular/router';
+import { RouterLink, RouterLinkActive } from '@angular/router';
 
 @Component({
   selector: 'app-sidebar',
-  imports: [MatIconModule, NgFor, NgClass, NgIf, MatMenuModule, FormsModule, DatePipe, RouterLink],
+  imports: [MatIconModule, NgFor, NgClass, NgIf, MatMenuModule, FormsModule, DatePipe, RouterLink, RouterLinkActive],
   templateUrl: './sidebar.component.html',
   styleUrl: './sidebar.component.scss'
 })

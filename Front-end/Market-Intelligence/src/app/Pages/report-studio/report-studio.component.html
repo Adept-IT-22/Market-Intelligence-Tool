@@ -230,33 +230,36 @@
                     </mat-menu>
 
                     <!-- Confidence & Source Anchors -->
-                    <div class="confidence-tag" [ngClass]="section.confidence.level.toLowerCase()"
-                      [matTooltip]="section.confidence.reason" (click)="setActiveSection(i)">
+                    <div class="confidence-tag" [ngClass]="section.confidence?.level?.toLowerCase() || 'low'"
+                      [matTooltip]="section.confidence?.reason || ''" (click)="setActiveSection(i)">
                       <mat-icon>verified</mat-icon>
-                      {{ section.confidence.level }}
+                      {{ section.confidence?.level }}
                     </div>
                   </div>
                 </div>
 
                 <!-- THE EDITOR (Controlled ContentEditable) -->
                 <div class="editor-block" contenteditable="true" (input)="onTextEdit(section.id, $event)"
-                  (focus)="setActiveSection(i)" [class.thinking]="section.isThinking">
+                  (focus)="setActiveSection(i)" [class.thinking]="section.isThinking" 
+                  *ngIf="section.aiDraft || section.userOverride">
                   {{ section.userOverride ?? section.aiDraft }}
-                  <div *ngIf="section.isThinking" class="thinking-overlay">
-                    <mat-progress-bar mode="indeterminate"></mat-progress-bar>
-                    <span>Adept AI is thinking...</span>
-                  </div>
-                  <div *ngIf="!section.aiDraft && !section.userOverride" class="placeholder">
-                    <ng-container *ngIf="getRoughNotes(section) as notes; else emptyInstruction">
-                      <div class="live-notes-preview">
-                        <span class="preview-badge-mini">LIVE NOTES (Pending Synthesis)</span>
-                        <pre class="notes-content">{{ notes }}</pre>
-                      </div>
-                    </ng-container>
-                    <ng-template #emptyInstruction>
-                      <em>Complete '{{ section.title }}' draft will appear here...</em>
-                    </ng-template>
-                  </div>
+                </div>
+                
+                <div *ngIf="section.isThinking" class="thinking-overlay">
+                  <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+                  <span>Adept AI is thinking...</span>
+                </div>
+                
+                <div *ngIf="!section.aiDraft && !section.userOverride && !section.isThinking" class="placeholder" (click)="setActiveSection(i)">
+                  <ng-container *ngIf="getRoughNotes(section) as notes; else emptyInstruction">
+                    <div class="live-notes-preview">
+                      <span class="preview-badge-mini">LIVE NOTES (Pending Synthesis)</span>
+                      <pre class="notes-content">{{ notes }}</pre>
+                    </div>
+                  </ng-container>
+                  <ng-template #emptyInstruction>
+                    <em>Complete '{{ section.title }}' draft will appear here...</em>
+                  </ng-template>
                 </div>
 
                 <mat-divider></mat-divider>
@@ -316,11 +319,11 @@
   <div class="error-full" *ngIf="initError()">
     <mat-icon color="warn">error</mat-icon>
     <p>{{ initError() }}</p>
-    <button mat-raised-button (click)="ngOnInit()">Retry Initialization</button>
+    <button mat-raised-button (click)="loadSchema(selectedType())">Retry Initialization</button>
   </div>
 
   <!-- ===== FULL-SCREEN PREVIEW OVERLAY ===== -->
-  <div class="preview-overlay" *ngIf="showPreview() && state() as s" (keydown.escape)="closePreview()">
+  <div class="preview-overlay" tabindex="-1" #previewOverlay *ngIf="showPreview() && state() as s" (keydown.escape)="closePreview()">
 
     <!-- Toolbar -->
     <div class="preview-toolbar">

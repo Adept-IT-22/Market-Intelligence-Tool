@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal, HostListener } from '@angular/core';
+import { Component, OnInit, inject, signal, HostListener, OnDestroy, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
@@ -15,6 +15,7 @@ import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MatNativeDateModule } from '@angular/material/core';
 import { ReportService, ReportState, SectionState } from '../../@shared/services/report.service';
 import { BaseLayoutComponent } from '../../@shared/components/base-layout/base-layout.component';
+import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'app-report-studio',
@@ -60,6 +61,9 @@ export class ReportStudioComponent implements OnInit {
   public initError = signal<string | null>(null);
   public showPreview = signal(false);
   
+  @ViewChild('previewOverlay', { static: false }) previewOverlay!: ElementRef;
+  private stateSub?: Subscription;
+  
   // Branding Configuration
   public brandLogo = '/adept_logo.jpg';
   public brandSidebar = '/adept_sidebar.png';
@@ -92,7 +96,13 @@ export class ReportStudioComponent implements OnInit {
 
   ngOnInit() {
     this.loadSchema('sprint');
-    this.reportService.state$.subscribe(s => this.state.set(s));
+    this.stateSub = this.reportService.state$.subscribe(s => this.state.set(s));
+  }
+  
+  ngOnDestroy() {
+    if (this.stateSub) {
+      this.stateSub.unsubscribe();
+    }
   }
 
   loadSchema(type: string) {
@@ -117,11 +127,27 @@ export class ReportStudioComponent implements OnInit {
     const s = this.state();
     if (!s) return;
     
-    // Update local form state for the specific section
-    const section = s.sections.find(sec => sec.id === sectionId);
-    if (section) {
-      section.formData[field] = value;
-    }
+    const updatedSections = s.sections.map(sec => {
+      if (sec.id === sectionId) {
+        return {
+          ...sec,
+          formData: {
+            ...sec.formData,
+            [field]: value
+          }
+        };
+      }
+      return sec;
+    });
+
+    // We can directly update the BehaviorSubject via a new method inside reportService if we wanted fully robust abstraction, 
+    // but since state is public/readonly theoretically, we manually update the service's stateSubject via an internal method or just re-initing.
+    // For now we'll trigger a full state update. Actually, `reportService` doesn't expose a method to arbitrarily update state, so we update the local signal, but to fix the desync we must update the service state properly.
+    // However, looking at report.service.ts we added `updateUserOverride`, maybe we need `updateSectionForm`.
+    // Wait, let's fix it by adding another method in ReportService. I will just do a hacky workaround if not available, wait, let me just add it to ReportService instead inside another tool call. I'll just temporarily update the formData then I'll use ReportService when I edit it next.
+    // Or we can just use the provided ReportService instance and access `stateSubject`. Wait, `stateSubject` is private.
+    // Let's implement an emitted event. I'll update ReportService.ts right after this.
+    this.reportService.updateSectionForm(sectionId, field, value);
   }
 
   generateReport() {
@@ -209,6 +235,11 @@ export class ReportStudioComponent implements OnInit {
   openPreview() {
     this.showPreview.set(true);
     document.body.style.overflow = 'hidden';
+    setTimeout(() => {
+      if (this.previewOverlay) {
+        this.previewOverlay.nativeElement.focus();
+      }
+    }, 0);
   }
 
   closePreview() {
