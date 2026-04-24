@@ -73,7 +73,7 @@
                   *ngIf="q.type === 'text' || q.type === 'number'">
                   <mat-label>{{ q.label }} <span class="required-star"
                       *ngIf="!section.formData[q.id]">*</span></mat-label>
-                  <input matInput [type]="q.type" [placeholder]="'e.g. ' + q.label" [(ngModel)]="section.formData[q.id]"
+                  <input matInput [type]="q.type" [(ngModel)]="section.formData[q.id]"
                     (ngModelChange)="onFormChange(section.id, q.id, $event)">
                 </mat-form-field>
 
@@ -81,7 +81,7 @@
                   *ngIf="q.type === 'textarea' || q.type === 'list'">
                   <mat-label>{{ q.label }} <span class="required-star"
                       *ngIf="!section.formData[q.id]">*</span></mat-label>
-                  <textarea matInput [rows]="q.type === 'list' ? 4 : 8" [placeholder]="'Enter ' + q.label + ' here...'"
+                  <textarea matInput [rows]="q.type === 'list' ? 4 : 8"
                     [(ngModel)]="section.formData[q.id]"
                     (ngModelChange)="onFormChange(section.id, q.id, $event)"></textarea>
                   <mat-hint *ngIf="q.type === 'list'">Bullet points are automatically handled by AI.</mat-hint>
@@ -141,7 +141,7 @@
             <div class="doc-page cover-page">
               <div class="cover-content">
                 <img [src]="brandLogo" class="cover-logo" alt="Adept Logo">
-                <h1 class="cover-title">{{ getDisplayTitle(s).toUpperCase() }}</h1>
+                <h1 class="cover-title">{{ (getDisplayTitle(s) || '').toUpperCase() }}</h1>
                 <p class="cover-date">{{ currentMonthYear }}</p>
               </div>
               <div class="branded-paper-footer">
@@ -230,10 +230,10 @@
                     </mat-menu>
 
                     <!-- Confidence & Source Anchors -->
-                    <div class="confidence-tag" [ngClass]="section.confidence?.level?.toLowerCase() || 'low'"
-                      [matTooltip]="section.confidence?.reason || ''" (click)="setActiveSection(i)">
+                    <div class="confidence-tag" [ngClass]="section.confidence.level.toLowerCase() || 'low'"
+                      [matTooltip]="section.confidence.reason || ''" (click)="setActiveSection(i)">
                       <mat-icon>verified</mat-icon>
-                      {{ section.confidence?.level }}
+                      {{ section.confidence.level }}
                     </div>
                   </div>
                 </div>
@@ -273,7 +273,7 @@
         </div>
 
         <!-- 4. ADVISOR OVERLAY (Auto-Insights) -->
-        <div class="advisor-shelf glass" *ngIf="s.analysis" [style.minHeight.px]="advisorHeight()">
+        <div class="advisor-shelf glass" *ngIf="s.analysis" [style.height.px]="advisorHeight()" style="flex: none;">
           <div class="resizer-handle" (mousedown)="startResizing($event)">
             <div class="grabber"></div>
           </div>
@@ -355,7 +355,7 @@
       <div class="prev-page cover-page">
         <div class="cover-content">
           <img [src]="brandLogo" class="cover-logo" alt="Adept Logo">
-          <h1 class="cover-title">{{ getDisplayTitle(s).toUpperCase() }}</h1>
+          <h1 class="cover-title">{{ (getDisplayTitle(s) || '').toUpperCase() }}</h1>
           <p class="cover-date">{{ currentMonthYear }}</p>
         </div>
         <div class="branded-paper-footer">

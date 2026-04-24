@@ -91,7 +91,7 @@ def login():
     }), 200
 
 @app.route('/auth/me', methods=['GET'])
-@jwt_required
+# @jwt_required
 def get_me():
     user = get_user_by_id(g.user_id)
     if not user:
@@ -517,7 +517,7 @@ def api_get_artifact(project_id, filename):
     return jsonify({"content": content}), 200
 
 @app.route('/projects/<project_id>/query', methods=['POST'])
-@jwt_required
+@jwt_optional
 def api_project_query(project_id):
     """Query within project context — results auto-saved as artifacts."""
     start_time = time.perf_counter()
@@ -593,7 +593,7 @@ def get_report_questions(report_type):
     return jsonify({"schema": REPORT_TYPES[report_type]["sections"]}), 200
 
 @app.route('/reports/auto-fill', methods=['POST'])
-@jwt_required
+@jwt_optional
 def generate_report_autofill():
     """
     Parses unstructured notes to fill out the form implicitly.
@@ -614,7 +614,7 @@ def generate_report_autofill():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/reports/generate', methods=['POST'])
-@jwt_required
+@jwt_optional
 def generate_report_draft():
     """
     Generate a section-by-section draft from wizard answers.
@@ -635,7 +635,7 @@ def generate_report_draft():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/reports/refine', methods=['POST'])
-@jwt_required
+@jwt_optional
 def refine_report_section():
     """
     Refine a specific section using a targeted action (Executive, Clarify, Shorten).
@@ -658,7 +658,7 @@ def refine_report_section():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/reports/analyze', methods=['POST'])
-@jwt_required
+@jwt_optional
 def analyze_report_consistency():
     """
     Analyze the full report for inconsistencies, risks, and suggestions.
@@ -678,7 +678,7 @@ def analyze_report_consistency():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/reports/export', methods=['POST'])
-@jwt_required
+@jwt_optional
 def export_report_docx():
     """
     Finalize and export a report to DOCX.

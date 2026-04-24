@@ -200,11 +200,15 @@ export class ReportStudioComponent implements OnInit {
     const deltaY = this.startY - event.clientY;
     const newHeight = Math.min(Math.max(this.startHeight + deltaY, 120), 600);
     this.advisorHeight.set(newHeight);
+    
+    // Prevent selection while resizing
+    document.body.classList.add('resizing-active');
   }
 
   @HostListener('window:mouseup')
   onMouseUp() {
     this.isResizing = false;
+    document.body.classList.remove('resizing-active');
   }
 
   onTextEdit(sectionId: string, event: any) {
@@ -280,10 +284,17 @@ export class ReportStudioComponent implements OnInit {
     }
   }
 
-  getDisplayTitle(s: ReportState): string {
+  getDisplayTitle(s: ReportState | null): string {
     if (!s || !s.sections || !s.sections[0]) return '';
     const formData = s.sections[0].formData || {};
-    return formData['project_name'] || formData['campaign_name'] || s.title;
+    let title = formData['project_name'] || formData['campaign_name'] || s.title || '';
+    
+    // If title is an object, extract a string property
+    if (typeof title === 'object' && title !== null) {
+      title = (title as any).value || (title as any).name || (title as any).text || (title as any).content || 'New Report';
+    }
+    
+    return String(title);
   }
 
   getRoughNotes(section: SectionState): string {

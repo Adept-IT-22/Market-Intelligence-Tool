@@ -301,7 +301,13 @@ class ReportAutomationEngine:
         Your task is to read the raw notes provided below and extract the relevant
         information to answer specific schema questions.
 
-        If a piece of information is simply NOT FOUND in the raw text, return an empty string "" for that key. Do not invent data.
+        CRITICAL: 
+        1. Try to populate EVERY field in the schema.
+        2. If a piece of information is simply NOT FOUND in the raw text, return "*" (an asterisk) for that key. 
+        3. Do NOT invent data, but be thorough in mapping synonymous terms.
+        4. Do NOT leave fields as empty strings if you can identify them, or if they are missing use "*".
+        5. VALUES MUST BE THE ANSWERS THEMSELVES (Strings, Numbers, or Arrays of strings). 
+        6. DO NOT return nested JSON objects like {"answer": "...", "question": "..."}. Just return the answer directly as the value for the key.
 
         SCHEMA TO FILL:
         {json.dumps(questions_schema, indent=2)}
@@ -309,7 +315,8 @@ class ReportAutomationEngine:
         RAW NOTES (User provided):
         \"\"\"{raw_text}\"\"\"
 
-        Return ONLY a raw JSON dictionary mapping exactly the keys from the SCHEMA to the extracted answers. No backticks, no markdown, just the JSON string starting with {{ and ending with }}.
+        Return ONLY a flat JSON dictionary mapping exactly the 'id' from the SCHEMA to the extracted answers. 
+        Example: {{"prepared_by": "John Doe", "sprint_number": 4}}
         """
         
         logger.info(f"Extracting structured answers for {report_type} via Auto-Fill feature.")

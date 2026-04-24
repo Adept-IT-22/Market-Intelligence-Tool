@@ -90,9 +90,14 @@ export class ReportService {
           const updatedSections = currentState.sections.map(s => {
             const newFormData = { ...s.formData };
             Object.keys(extracted).forEach(k => {
+              let val = extracted[k];
               // Only overwrite if the AI actually extracted something meaningful
-              if (extracted[k] !== undefined && extracted[k] !== null && extracted[k] !== "") {
-                newFormData[k] = extracted[k];
+              if (val !== undefined && val !== null && val !== "") {
+                // Safeguard: If AI returns an object instead of a string, flatten it
+                if (typeof val === 'object' && val !== null) {
+                  val = val.answer || val.value || val.name || val.text || val.content || JSON.stringify(val);
+                }
+                newFormData[k] = val;
               }
             });
             return { ...s, formData: newFormData };
