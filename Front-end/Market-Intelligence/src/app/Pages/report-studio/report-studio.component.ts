@@ -15,6 +15,7 @@ import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MatNativeDateModule } from '@angular/material/core';
 import { ReportService, ReportState, SectionState } from '../../@shared/services/report.service';
 import { BaseLayoutComponent } from '../../@shared/components/base-layout/base-layout.component';
+import { MarkdownModule } from 'ngx-markdown';
 import { Subscription } from 'rxjs';
 
 @Component({
@@ -36,6 +37,7 @@ import { Subscription } from 'rxjs';
     MatDividerModule,
     MatDatepickerModule,
     MatNativeDateModule,
+    MarkdownModule,
     BaseLayoutComponent
   ],
   templateUrl: './report-studio.component.html',
@@ -66,6 +68,7 @@ export class ReportStudioComponent implements OnInit {
   
   // Branding Configuration
   public brandLogo = '/adept_logo.jpg';
+  public brandLogoUi = '/transparent adept logo.png';
   public brandSidebar = '/adept_sidebar.png';
   public brandFooter = '/adept_footer.png';
   
@@ -103,6 +106,49 @@ export class ReportStudioComponent implements OnInit {
     if (this.stateSub) {
       this.stateSub.unsubscribe();
     }
+  }
+
+  loadDemoData() {
+    const s = this.state();
+    if (!s) return;
+
+    // 1. Metadata
+    this.onFormChange('metadata', 'project_name', 'Manuh Market Intelligence Platform');
+    this.onFormChange('metadata', 'report_by', 'Emmanuel Mwendia Maina');
+    this.onFormChange('metadata', 'sprint_no', 4);
+    this.onFormChange('metadata', 'period', new Date('2026-04-22'));
+    this.onFormChange('metadata', 'sprint_goal', 'Deliver a functional Market Intelligence MVP module with:\n- Completed frontend dashboard views\n- Integrated report generation (Report Studio)\n- Initial data pipeline validation');
+    this.onFormChange('metadata', 'sprint_scope', 'This sprint focused on transitioning Manuh from UI completion → functional analytics system.\n\nIncluded:\n- Dashboard UI finalization\n- Report Studio implementation\n- Basic data flow integration (mock/live hybrid)\n\nExcluded:\n- Advanced analytics models\n- Full production deployment\n- External API integrations');
+
+    // 2. Intro
+    this.onFormChange('intro', 'executive_summary', 'Core system components were successfully built and integrated. However, deployment and full system validation remain incomplete, pushing critical tasks into the next sprint.');
+
+    // 3. Status
+    this.onFormChange('status', 'status_rating', 'Delayed');
+    this.onFormChange('status', 'summary_text', 'Core system components were successfully built and integrated. However, deployment and full system validation remain incomplete, pushing critical tasks into the next sprint.');
+    this.onFormChange('status', 'timeline', 'April 8 – April 22, 2026');
+    this.onFormChange('status', 'time_spent', '167 hours');
+
+    // 4. Progress
+    this.onFormChange('progress_detail', 'tasks_completed', '✅ Analytics Dashboard (UI + partial data binding)\n✅ Report Studio (create, preview, export reports)\n✅ Frontend–Backend communication (core endpoints working)');
+
+    // 5. Next Sprint
+    this.onFormChange('next_sprint', 'future_tasks', '⏳ Server deployment\n- Advanced analytics models\n- External API integrations');
+
+    // 6. Issues
+    this.onFormChange('issues', 'issue_list', 'Deployment and full system validation remain incomplete, pushing critical tasks into the next sprint.\nMissing production SSL certificates.\nPending third-party security audit.');
+
+    // 7. Approvals
+    this.onFormChange('next_steps', 'pending_approvals', 'Server deployment authorization\nFinal usability validation approval\nProduction environment access');
+    
+    // Set Demo Drafts via service to avoid mutation issues
+    this.reportService.updateSectionDraft('progress_detail', '#### Key Accomplishments\n- **Analytics Dashboard:** Completed all UI components and partial data binding.\n- **Report Studio:** End-to-end workflow implemented (create, preview, export).\n- **API Integration:** Core frontend-backend communication endpoints are operational.');
+    
+    this.reportService.updateSectionDraft('next_sprint', '#### Upcoming Priorities\n- **Server Deployment:** Critical task pushed to next sprint.\n- **Advanced Models:** Integration of predictive analytics.\n- **External APIs:** Finalizing third-party data connectors.');
+    
+    this.reportService.updateSectionDraft('qa', '#### QA Metrics & Findings\n- **Test Coverage:** 84% unit test coverage achieved.\n- **Bugs Identified:** 12 minor UI glitches found (fixed).\n- **Performance:** Average response time < 200ms for core dashboards.');
+    
+    this.reportService.updateSectionDraft('issues', '#### Current Blockers\n- **Deployment:** Awaiting production environment provisioning.\n- **Validation:** Full end-to-end system testing delayed by 2 days.');
   }
 
   loadSchema(type: string) {
@@ -218,6 +264,63 @@ export class ReportStudioComponent implements OnInit {
 
   // --- Navigation & UI ---
 
+  getTOCIndex(sections: any[], currentIndex: number): string {
+    const currentSection = sections[currentIndex];
+    
+    if (currentSection.id === 'status') return '1.1';
+    
+    // primarySections skips metadata and status (which is 1.1)
+    const primarySections = sections.filter(s => s.id !== 'metadata' && s.id !== 'status');
+    const idx = primarySections.findIndex(s => s.id === currentSection.id);
+    
+    if (idx >= 0) {
+      return `${idx + 1}`;
+    }
+    
+    return '';
+  }
+
+  getTOCPage(sections: any[], currentIndex: number): number {
+    // Index 0 (Metadata) is on Cover -> P1
+    if (currentIndex === 0) return 1;
+
+    // Index 1 (Introduction) starts on P3
+    if (currentIndex === 1) return 3;
+
+    // Subsequent sections start from P4 onwards
+    let page = 2 + currentIndex;
+    
+    // Account for potential Intro splitting (shifts all pages after Index 1)
+    if (this.shouldSplitIntro(this.state()) && currentIndex > 1) {
+      page += 1;
+    }
+
+    // Account for potential Issues & Blockers splitting (Section 5 -> Index 6 usually? No, check indices)
+    // Actually, let's use the actual index. 
+    // Metadata=0, Intro=1, Status=2, Progress=3, NextSprint=4, QA=5, Issues=6, Approvals=7
+    if (this.shouldBreakIssues(this.state()) && currentIndex > 6) {
+      page += 1;
+    }
+
+    return page;
+  }
+
+  hasVisibleSectionAfter(sections: any[], currentIndex: number): boolean {
+    for (let i = currentIndex + 1; i < sections.length; i++) {
+      if (sections[i].id !== 'metadata' && sections[i].id !== 'status') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  scrollToTop() {
+    const el = document.querySelector('.document-scroller');
+    if (el) {
+      el.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
   scrollToSection(index: number) {
     this.activeSectionIndex.set(index);
     const section = this.state()?.sections[index];
@@ -297,8 +400,19 @@ export class ReportStudioComponent implements OnInit {
     return String(title);
   }
 
-  getRoughNotes(section: SectionState): string {
-    if (!section || !section.formData) return '';
+  getMetadata(s: ReportState | null) {
+    if (!s || !s.sections || !s.sections[0]) return null;
+    const formData = s.sections[0].formData || {};
+    return {
+      project: formData['project_name'] || 'Market Intelligence',
+      preparedBy: formData['prepared_by'] || 'Adept Studio',
+      date: formData['reporting_date'] || this.currentMonthYear,
+      type: this.reportTypes.find(t => t.id === s.type)?.name || 'Strategic Report'
+    };
+  }
+
+  getRoughNotes(section: any): string {
+    if (!section || !section.formData || section.id === 'metadata') return '';
     
     // Convert the formData object into an array of strings, properly stringifying arrays (like bullet points) or objects, and filtering out empty values.
     const values = Object.entries(section.formData).map(([k, v]) => {
@@ -311,5 +425,142 @@ export class ReportStudioComponent implements OnInit {
     }).filter(v => v !== null) as string[];
 
     return values.join('\n\n');
+  }
+
+  getAggregatedWhatNext(s: ReportState | null): string[] {
+    if (!s || !s.sections) return [];
+    
+    const nextSprint = s.sections.find(sec => sec.id === 'next_sprint');
+    const approvals = s.sections.find(sec => sec.id === 'next_steps');
+    
+    let combined: string[] = [];
+    
+    const cleanItem = (item: string) => {
+      // Remove leading bullets, various dashes (en, em), numbers, and spaces
+      // Handling -, *, •, ., –, —, and digit-based lists
+      return item.replace(/^[•\-\*\. \d–—]+\s*/, '').trim();
+    };
+    
+    if (nextSprint?.formData?.['future_tasks']) {
+      const tasks = String(nextSprint.formData['future_tasks'])
+        .split('\n')
+        .filter(t => t.trim())
+        .map(cleanItem);
+      combined = [...combined, ...tasks];
+    }
+    
+    if (approvals?.formData?.['pending_approvals']) {
+      const apps = String(approvals.formData['pending_approvals'])
+        .split('\n')
+        .filter(t => t.trim())
+        .map(cleanItem);
+      
+      if (combined.length > 0 && apps.length > 0) {
+        combined.push('**Required Approvals:**');
+      }
+      combined = [...combined, ...apps];
+    }
+    
+    return combined.slice(0, 5); 
+  }
+
+  getSplitIntro(s: ReportState | null, part: 1 | 2): string {
+    if (!s || !s.sections || !s.sections[1]) return '';
+    const text = s.sections[1].userOverride ?? s.sections[1].aiDraft ?? '';
+    
+    // Heuristic: ~2500 chars fit Page 3 (with the summary boxes)
+    const splitPoint = 2200; 
+    
+    if (text.length <= splitPoint) {
+      return part === 1 ? text : '';
+    }
+    
+    // Find a good paragraph break near the split point
+    let breakIndex = text.lastIndexOf('\n', splitPoint);
+    if (breakIndex < splitPoint / 2) breakIndex = splitPoint; // Fallback
+
+    if (part === 1) {
+      return text.substring(0, breakIndex);
+    } else {
+      return text.substring(breakIndex).trim();
+    }
+  }
+
+  shouldSplitIntro(s: ReportState | null): boolean {
+    if (!s || !s.sections || !s.sections[1]) return false;
+    const text = s.sections[1].userOverride ?? s.sections[1].aiDraft ?? '';
+    return text.length > 2200;
+  }
+
+  shouldBreakOverallStatus(s: ReportState | null): boolean {
+    if (!s || !s.sections) return false;
+    
+    // Always break if the Intro is already splitting onto two pages
+    if (this.shouldSplitIntro(s)) return true;
+
+    // Check the Intro content length (both form data and AI draft)
+    const introLen = Math.max(
+      (s.sections[1]?.formData?.['executive_summary'] || '').length,
+      (s.sections[1]?.userOverride ?? s.sections[1]?.aiDraft ?? '').length
+    );
+
+    // Check the Status content length
+    const statusLen = Math.max(
+      (s.sections[2]?.formData?.['summary_text'] || '').length,
+      (s.sections[2]?.userOverride ?? s.sections[2]?.aiDraft ?? '').length
+    );
+    
+    // If combined visible content is substantial, break to new page
+    return (introLen + statusLen) > 300; // Increased threshold for AI drafts
+  }
+
+  shouldBreakIssues(s: ReportState | null): boolean {
+    if (!s || !s.sections || !s.sections[6]) return false;
+    const section = s.sections[6];
+    const text = section.userOverride ?? section.aiDraft ?? '';
+    // Only break if content is long AND contains the split marker
+    return text.length > 1400 && text.includes('Next Steps'); 
+  }
+
+  getSplitIssues(s: ReportState | null, part: 1 | 2): string {
+    if (!s || !s.sections || !s.sections[6]) return '';
+    const text = s.sections[6].userOverride ?? s.sections[6].aiDraft ?? '';
+    
+    // Find the "Next Steps" or similar header to split at
+    const splitTerm = 'Next Steps';
+    const splitIndex = text.indexOf(splitTerm);
+    
+    if (splitIndex === -1 || text.length < 1200) {
+      return part === 1 ? text : '';
+    }
+
+    if (part === 1) {
+      return text.substring(0, splitIndex).trim();
+    } else {
+      return text.substring(splitIndex).trim();
+    }
+  }
+
+  runAdvisor() {
+    this.reportService.analyzeReport();
+  }
+
+  jumpToFix(targetId: string) {
+    const s = this.state();
+    if (!s) return;
+    
+    const index = s.sections.findIndex(sec => sec.id === targetId);
+    if (index >= 0) {
+      this.setActiveSection(index);
+      
+      // Add a temporary highlight to the form field
+      setTimeout(() => {
+        const field = document.getElementById(`field-${targetId}`);
+        if (field) {
+          field.classList.add('highlight-guide');
+          setTimeout(() => field.classList.remove('highlight-guide'), 3000);
+        }
+      }, 500);
+    }
   }
 }

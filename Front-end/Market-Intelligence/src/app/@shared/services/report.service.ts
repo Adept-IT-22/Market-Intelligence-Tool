@@ -12,7 +12,7 @@ export interface SectionState {
   id: string;
   title: string;
   formData: any;
-  aiDraft: string;
+  aiDraft?: string;
   userOverride?: string | null;
   isEdited: boolean;
   confidence: Confidence;
@@ -24,9 +24,9 @@ export interface ReportState {
   title: string;
   sections: SectionState[];
   analysis?: {
-    risks: string[];
-    inconsistencies: string[];
-    suggestions: string[];
+    risks: { text: string; target_id: string }[];
+    inconsistencies: { text: string; target_id: string }[];
+    suggestions: { text: string; target_id: string }[];
   };
   isGenerating: boolean;
 }
@@ -242,6 +242,23 @@ export class ReportService {
               ...s.formData,
               [field]: value
             }
+          };
+        }
+        return s;
+      });
+      this.stateSubject.next({ ...state, sections: updatedSections });
+    }
+  }
+
+  updateSectionDraft(sectionId: string, draft: string) {
+    const state = this.stateSubject.value;
+    if (state) {
+      const updatedSections = state.sections.map(s => {
+        if (s.id === sectionId) {
+          return {
+            ...s,
+            aiDraft: draft,
+            confidence: { level: 'High' as 'High' | 'Med' | 'Low', reason: 'Verified demo data' }
           };
         }
         return s;

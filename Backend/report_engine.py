@@ -27,7 +27,7 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
 # --- Report Type Abstraction ---
 REPORT_TYPES = {
     "sprint": {
-        "title": "Sprint Report",
+        "title": "Sprint Review Report",
         "sections": [
             {
                 "id": "metadata",
@@ -36,28 +36,54 @@ REPORT_TYPES = {
                     {"id": "project_name", "label": "Project Name", "type": "text"},
                     {"id": "report_by", "label": "Prepared By", "type": "text"},
                     {"id": "sprint_no", "label": "Sprint Number", "type": "number"},
-                    {"id": "period", "label": "Reporting Date", "type": "date"}
+                    {"id": "period", "label": "Reporting Date", "type": "date"},
+                    {"id": "sprint_goal", "label": "Sprint Goal", "type": "textarea"},
+                    {"id": "sprint_scope", "label": "Sprint Scope", "type": "textarea"}
                 ]
             },
             {
+                "id": "intro",
+                "title": "Introduction",
+                "questions": [
+                    {"id": "executive_summary", "label": "Executive Summary", "type": "textarea"}
+                ],
+                "retrieval_query": "adept report introduction standards executive summary"
+            },
+            {
                 "id": "status",
-                "title": "Sprint Summary & Health",
+                "title": "Overall Status",
                 "questions": [
                     {"id": "status_rating", "label": "Overall Status", "type": "dropdown", "options": ["Delayed", "On Track", "Ahead"]},
                     {"id": "summary_text", "label": "High-Level Summary", "type": "textarea"},
                     {"id": "timeline", "label": "Timeline (e.g. 4th - 15th Aug)", "type": "text"},
-                    {"id": "time_spent", "label": "Time Spent Total", "type": "text"},
-                    {"id": "what_next", "label": "What Next?", "type": "textarea"}
+                    {"id": "time_spent", "label": "Time Spent Total", "type": "text"}
                 ],
                 "retrieval_query": "how to write executive summary adept status report standards"
             },
             {
-                "id": "progress",
-                "title": "Detailed Accomplishments",
+                "id": "progress_detail",
+                "title": "Progress",
                 "questions": [
-                    {"id": "tasks_completed", "label": "What was achieved this sprint?", "type": "list"}
+                    {"id": "tasks_completed", "label": "Key Accomplishments", "type": "list"}
                 ],
-                "retrieval_query": "adept progress reporting guidelines delivery playbook accomplishments"
+                "retrieval_query": "adept progress reporting guidelines"
+            },
+            {
+                "id": "next_sprint",
+                "title": "Next Sprint Priority",
+                "questions": [
+                    {"id": "future_tasks", "label": "Upcoming Priorities", "type": "list"}
+                ],
+                "retrieval_query": "adept future planning standards"
+            },
+            {
+                "id": "qa",
+                "title": "QA",
+                "questions": [
+                    {"id": "qa_metrics", "label": "QA Metrics & Findings", "type": "textarea"},
+                    {"id": "test_results", "label": "Key Test Results", "type": "list"}
+                ],
+                "retrieval_query": "adept QA reporting standards testing metrics"
             },
             {
                 "id": "issues",
@@ -69,11 +95,11 @@ REPORT_TYPES = {
             },
             {
                 "id": "next_steps",
-                "title": "Sprint 4 Priorities",
+                "title": "Approvals needed",
                 "questions": [
-                    {"id": "upcoming_tasks", "label": "Immediate Priorities", "type": "list"}
+                    {"id": "pending_approvals", "label": "Required Approvals", "type": "list"}
                 ],
-                "retrieval_query": "adept future planning next steps delivery lifecycle"
+                "retrieval_query": "adept governance approval process"
             }
         ],
         "docx_template": "report_templates/sprint_report.docx",
@@ -184,8 +210,6 @@ class ReportAutomationEngine:
     def _sanitize_markdown(self, text):
         if not text: return ""
         import re
-        # Remove bold markers
-        text = text.replace("**", "").replace("__", "")
         # Remove Markdown headers (levels 1-6) only at the start of lines
         text = re.sub(r'^\s*#{1,6}\s+', '', text, flags=re.MULTILINE)
         return text.strip()
@@ -229,9 +253,19 @@ class ReportAutomationEngine:
             
             # Prompt Gemini
             from agent_manager import call_gemini_sync
+            # Calculate section index matching the frontend's strategic numbering logic
+            # metadata (0), intro (1), status (2), progress (3)...
+            if section_id == 'intro':
+                section_index = 1
+            elif section_id == 'status':
+                section_index = 1 # Will result in 1.1, 1.2
+            else:
+                # Sections from index 3 onwards are numbered 2, 3, 4...
+                section_index = config['sections'].index(section) - 1
+                
             prompt = f"""
             You are the Adept Report Synthesizer.
-            Your goal is to transform rough user updates into high-quality professional report content.
+            Your goal is to transform rough user updates into high-quality professional report content in a sharp, consulting-grade style.
             
             --- ADEPT GUIDELINES & STANDARDS ---
             {context['text']}
@@ -243,15 +277,17 @@ class ReportAutomationEngine:
             Write the {section['title']} section for the {config['title']}.
             1. Use professional, active voice.
             2. Follow the tone and formatting logic found in the guidelines.
-            3. Be concise and actionable.
-            4. Do NOT include placeholders; if data is missing, write a polite summary of what we know.
+            3. Use systematic sub-section numbering: {section_index}.1, {section_index}.2, etc. 
+               EVERY major topic (e.g., "Status", "Summary", "What Next", "Timeline") MUST be a numbered sub-heading, not a bullet point.
+            4. Use Markdown Tables for data that benefits from structured comparison (e.g., Progress vs. Target, Status Metrics, Task Lists).
+            5. Ensure the table headers are concise and professional.
             
             --- CRITICAL FORMATTING RULES ---
-            - Absolutely NO Markdown formatting.
-            - NO asterisks (**), NO hashtags (#), NO bolding, NO italics.
-            - Output ONLY raw, professional paragraph text.
-            - Do NOT include the section title.
-            - No intros or outros.
+            - NO Markdown headers (#). Use the {section_index}.X numbering for headings.
+            - Bolding is allowed for the numbered sub-headings (e.g. **{section_index}.1 Summary**).
+            - Do NOT include the main section title ({section['title']}).
+            - Use a single newline between paragraphs.
+            - Ensure tables have a header row.
             """
             
             logger.info(f"Generating section: {section['title']}")
@@ -397,7 +433,9 @@ class ReportAutomationEngine:
         REPORT DATA:
         {report_text}
         
-        Return ONLY a JSON object with keys: "inconsistencies", "risks", "suggestions" (all lists).
+        Return ONLY a JSON object with keys: "inconsistencies", "risks", "suggestions".
+        Each key must be a list of objects: {{"text": "the observation", "target_id": "the section id it relates to"}}.
+        The 'target_id' MUST match one of the keys in the REPORT DATA provided.
         """
         
         from agent_manager import call_gemini_sync
@@ -470,8 +508,13 @@ class ReportAutomationEngine:
             logger.warning(f"Template not found at {template_path}.")
             return False
 
-        # 1. Transform list back to dictionary for template direct-lookups
-        sections_dict = {s['id']: s for s in section_list}
+        # 1. Transform list back to dictionary for template direct-lookups with numbering
+        sections_dict = {}
+        for i, s in enumerate(section_list):
+            s_copy = s.copy()
+            # Prefix title with number (Start from 2 since Introduction/Header is 1)
+            s_copy['title'] = f"{i + 2}. {s['title']}"
+            sections_dict[s['id']] = s_copy
         
         # 2. Extract cover page metadata (usually from 'metadata' section)
         metadata_sec = sections_dict.get('metadata', {})

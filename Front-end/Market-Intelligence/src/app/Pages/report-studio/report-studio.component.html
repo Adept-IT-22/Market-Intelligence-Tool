@@ -3,7 +3,7 @@
     <!-- 1. HEADER / TOOLBAR -->
     <header class="studio-header glass">
       <div class="brand">
-        <img [src]="brandLogo" class="site-logo" alt="Adept Logo">
+        <img [src]="brandLogoUi" class="site-logo" alt="Adept Logo">
         <div class="v-divider"></div>
         <div class="title-group">
           <h1>Adept Studio</h1>
@@ -16,6 +16,9 @@
       </div>
 
       <div class="actions">
+        <button mat-button class="btn-secondary" (click)="loadDemoData()">
+          <mat-icon>auto_fix_high</mat-icon> Load Demo
+        </button>
         <button mat-button class="btn-secondary" (click)="generateReport()" [disabled]="s.isGenerating">
           <mat-icon>{{ s.isGenerating ? 'sync' : 'bolt' }}</mat-icon>
           {{ s.isGenerating ? 'Drafting...' : 'Draft with AI' }}
@@ -30,9 +33,16 @@
       <!-- 2. LEFT PANE: Structure & Inputs -->
       <aside class="left-pane glass">
         <div class="stepper">
-          <div *ngFor="let section of s.sections; let i = index" class="step"
-            [class.active]="activeSectionIndex() === i" (click)="scrollToSection(i)">
-            <div class="step-num">{{ i + 1 }}</div>
+          <!-- Metadata Setup (Unnumbered) -->
+          <div *ngIf="s.sections[0] as meta" class="step setup-step" [class.active]="activeSectionIndex() === 0"
+            (click)="scrollToSection(0)">
+            <div class="step-num"><mat-icon>settings</mat-icon></div>
+            <span class="step-title">{{ meta.title }}</span>
+          </div>
+
+          <div *ngFor="let section of s.sections.slice(1); let i = index" class="step"
+            [class.active]="activeSectionIndex() === (i + 1)" (click)="scrollToSection(i + 1)">
+            <div class="step-num">{{ getTOCIndex(s.sections, i + 1) }}</div>
             <span class="step-title">{{ section.title }}</span>
             <mat-icon *ngIf="section.isEdited" class="edited-tag">edit_note</mat-icon>
           </div>
@@ -62,15 +72,14 @@
         </div>
 
         <div class="form-content">
-          <div class="section-card" *ngIf="s.sections[activeSectionIndex()] as section">
+          <div class="section-card" *ngIf="s.sections[activeSectionIndex()] as section" [id]="'field-' + section.id">
             <h3>{{ section.title }}</h3>
             <p class="subtitle">Complete the fields below to synthesize this section.</p>
 
             <div class="questions">
               <!-- Dynamic Questions based on Schema -->
               <ng-container *ngFor="let q of sectionSchema()[activeSectionIndex()]?.questions">
-                <mat-form-field appearance="outline" class="full-width"
-                  *ngIf="q.type === 'text' || q.type === 'number'">
+                <mat-form-field appearance="outline" *ngIf="q.type === 'text' || q.type === 'number'">
                   <mat-label>{{ q.label }} <span class="required-star"
                       *ngIf="!section.formData[q.id]">*</span></mat-label>
                   <input matInput [type]="q.type" [(ngModel)]="section.formData[q.id]"
@@ -81,13 +90,12 @@
                   *ngIf="q.type === 'textarea' || q.type === 'list'">
                   <mat-label>{{ q.label }} <span class="required-star"
                       *ngIf="!section.formData[q.id]">*</span></mat-label>
-                  <textarea matInput [rows]="q.type === 'list' ? 4 : 8"
-                    [(ngModel)]="section.formData[q.id]"
+                  <textarea matInput [rows]="q.type === 'list' ? 4 : 8" [(ngModel)]="section.formData[q.id]"
                     (ngModelChange)="onFormChange(section.id, q.id, $event)"></textarea>
                   <mat-hint *ngIf="q.type === 'list'">Bullet points are automatically handled by AI.</mat-hint>
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="full-width" *ngIf="q.type === 'date'">
+                <mat-form-field appearance="outline" *ngIf="q.type === 'date'">
                   <mat-label>{{ q.label }} <span class="required-star"
                       *ngIf="!section.formData[q.id]">*</span></mat-label>
                   <input matInput [matDatepicker]="picker" [(ngModel)]="section.formData[q.id]"
@@ -96,7 +104,7 @@
                   <mat-datepicker #picker></mat-datepicker>
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="full-width" *ngIf="q.type === 'dropdown'">
+                <mat-form-field appearance="outline" *ngIf="q.type === 'dropdown'">
                   <mat-label>{{ q.label }} <span class="required-star"
                       *ngIf="!section.formData[q.id]">*</span></mat-label>
                   <mat-select [(ngModel)]="section.formData[q.id]"
@@ -143,28 +151,44 @@
                 <img [src]="brandLogo" class="cover-logo" alt="Adept Logo">
                 <h1 class="cover-title">{{ (getDisplayTitle(s) || '').toUpperCase() }}</h1>
                 <p class="cover-date">{{ currentMonthYear }}</p>
+
               </div>
+
               <div class="branded-paper-footer">
                 <img [src]="brandFooter" alt="Adept Footer">
               </div>
             </div>
-
             <!-- Page Break Simulation -->
             <div class="page-break-line"><span>PAGE BREAK</span></div>
 
             <!-- 3.2 TABLE OF CONTENTS -->
             <div class="doc-page toc-page">
+              <div class="running-header" *ngIf="getMetadata(s) as meta">
+                <span>{{ meta.project }} | {{ meta.type }}</span>
+                <span class="rh-date">{{ meta.date }}</span>
+              </div>
               <h2 class="toc-title">TABLE OF CONTENTS</h2>
               <div class="toc-list">
-                <div class="toc-item" *ngFor="let section of s.sections; let i = index" (click)="scrollToSection(i)">
-                  <span class="t-num">{{ i + 1 }}.</span>
-                  <span class="t-label">{{ section.title }}</span>
+                <div class="toc-item" (click)="scrollToTop()">
+                  <span class="t-label">Sprint Review Report</span>
                   <span class="t-dots"></span>
-                  <span class="t-page">{{ i + 3 }}</span>
+                  <span class="t-page">3</span>
                 </div>
+                <ng-container *ngFor="let section of s.sections; let i = index">
+                  <div class="toc-item" *ngIf="section.id !== 'metadata'"
+                    (click)="scrollToSection(i)">
+                    <span class="t-num">{{ getTOCIndex(s.sections, i) }}.</span>
+                    <span class="t-label">{{ section.title }}</span>
+                    <span class="t-dots"></span>
+                    <span class="t-page">{{ getTOCPage(s.sections, i) }}</span>
+                  </div>
+                </ng-container>
               </div>
               <div class="branded-paper-footer">
-                <img [src]="brandFooter" alt="Adept Footer">
+                <div class="footer-meta" *ngIf="getMetadata(s) as meta">
+                  <span>{{ meta.project }} | {{ meta.date }}</span>
+                  <span class="page-num">Page 2</span>
+                </div>
               </div>
             </div>
 
@@ -172,103 +196,203 @@
             <div class="page-break-line"><span>PAGE BREAK</span></div>
 
             <!-- 3.3 CONTENT START -->
-            <div class="doc-page content-header">
-              <div class="underlined-header">
-                <h2>{{ getDisplayTitle(s) }}</h2>
-              </div>
-
-              <!-- Executive Summary Boxes (If Sprint) -->
-              <div class="summary-boxes" *ngIf="s.type === 'sprint'">
-                <!-- Orange Box -->
-                <div class="box orange-box">
-                  <h4>This Sprint's Summary:</h4>
-                  <ul>
-                    <li><strong>Status:</strong> <span
-                        [class.delayed]="s.sections[1].formData['status_rating'] === 'Delayed'">{{
-                        s.sections[1].formData['status_rating'] || '[Overall Status]' }}</span></li>
-                    <li><strong>Summary:</strong> {{ s.sections[1].formData['summary_text'] || '[High-Level Summary]' }}
-                    </li>
-                    <li><strong>Timeline:</strong> {{ s.sections[1].formData['timeline'] || '[Timeline]' }}</li>
-                    <li><strong>Time Spent:</strong> {{ s.sections[1].formData['time_spent'] || '[Time Spent]' }}</li>
-                  </ul>
-                </div>
-                <!-- Teal Box -->
-                <div class="box teal-box">
-                  <h4>Project Info:</h4>
-                  <div class="info-row"><strong>Project:</strong> {{ s.sections[0].formData['project_name'] || '[Project
-                    Name]' }}</div>
-                  <div class="info-row"><strong>Content:</strong> {{ getDisplayTitle(s) }}</div>
-                  <div class="info-row"><strong>By:</strong> {{ s.sections[0].formData['report_by'] || '[Prepared By]'
-                    }}</div>
-                </div>
-              </div>
-            </div>
-
+            <!-- 3.3 PAGINATED CONTENT FLOW (A4 Blocks) -->
             <ng-container *ngFor="let section of s.sections; let i = index">
-              <div class="paper-section" *ngIf="section.id !== 'metadata'" [id]="'render-' + section.id"
-                [class.active-focus]="activeSectionIndex() === i">
-                <div class="section-header">
-                  <h4>{{ section.title }}</h4>
-                  <!-- Section AI Controls -->
-                  <div class="ai-controls" *ngIf="section.aiDraft || section.userOverride">
-                    <button mat-icon-button [matMenuTriggerFor]="refineMenu" matTooltip="Refine with AI">
-                      <mat-icon>magic_button</mat-icon>
-                    </button>
-                    <mat-menu #refineMenu="matMenu">
-                      <button mat-menu-item (click)="refine(section.id, 'make_executive')">
-                        <mat-icon>trending_up</mat-icon>
-                        <span>Make Executive</span>
+              <!-- Skip Metadata and Overall Status from starting new pages -->
+              <div class="doc-page content-page" *ngIf="section.id !== 'metadata'" [id]="'render-' + section.id">
+                <div class="running-header" *ngIf="getMetadata(s) as meta">
+                  <span>{{ meta.project }} | {{ meta.type }}</span>
+                  <span class="rh-date">{{ meta.date }}</span>
+                </div>
+                <!-- Individual Sections (Now un-wrapped from their own pages) -->
+                <div class="paper-section" 
+                  *ngIf="section.id !== 'metadata'"
+                  [class.active-focus]="activeSectionIndex() === i">
+                    <div class="section-header" *ngIf="section.id !== 'intro'">
+                    <h4>{{ getTOCIndex(s.sections, i) }}. {{ section.title }}</h4>
+                    <!-- Section AI Controls -->
+                    <div class="ai-controls" *ngIf="section.aiDraft || section.userOverride">
+                      <button mat-icon-button [matMenuTriggerFor]="refineMenu" matTooltip="Refine with AI">
+                        <mat-icon>magic_button</mat-icon>
                       </button>
-                      <button mat-menu-item (click)="refine(section.id, 'clarify')">
-                        <mat-icon>auto_fix_high</mat-icon>
-                        <span>Improve Clarity</span>
-                      </button>
-                      <button mat-menu-item (click)="refine(section.id, 'shorten')">
-                        <mat-icon>align_vertical_bottom</mat-icon>
-                        <span>Shorten</span>
-                      </button>
-                    </mat-menu>
+                      <mat-menu #refineMenu="matMenu">
+                        <button mat-menu-item (click)="refine(section.id, 'make_executive')">
+                          <mat-icon>trending_up</mat-icon>
+                          <span>Make Executive</span>
+                        </button>
+                        <button mat-menu-item (click)="refine(section.id, 'clarify')">
+                          <mat-icon>auto_fix_high</mat-icon>
+                          <span>Improve Clarity</span>
+                        </button>
+                        <button mat-menu-item (click)="refine(section.id, 'shorten')">
+                          <mat-icon>align_vertical_bottom</mat-icon>
+                          <span>Shorten</span>
+                        </button>
+                      </mat-menu>
 
-                    <!-- Confidence & Source Anchors -->
-                    <div class="confidence-tag" [ngClass]="section.confidence.level.toLowerCase() || 'low'"
-                      [matTooltip]="section.confidence.reason || ''" (click)="setActiveSection(i)">
-                      <mat-icon>verified</mat-icon>
-                      {{ section.confidence.level }}
+                      <!-- Confidence & Source Anchors -->
+                      <div class="confidence-tag" [ngClass]="section.confidence.level.toLowerCase() || 'low'"
+                        [matTooltip]="section.confidence.reason || ''" (click)="setActiveSection(i)">
+                        <mat-icon>verified</mat-icon>
+                        {{ section.confidence.level }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Introduction Specialized Layout (Summary Boxes) -->
+                  <div class="intro-layout" *ngIf="section.id === 'intro'">
+                    <div class="section-header">
+                      <h4>{{ getTOCIndex(s.sections, i) }}. {{ section.title }}</h4>
+                    </div>
+                    <div class="project-phase" *ngIf="s.sections[0].formData['sprint_no']">
+                      <strong>Sprint Goal:</strong> Sprint {{ s.sections[0].formData['sprint_no'] }} – {{
+                      s.sections[0].formData['sprint_goal'] || 'Strategic Growth' }}
+                    </div>
+
+                    <div class="summary-grid">
+                      <div class="summary-box orange-box">
+                        <h4>This Sprint's Summary:</h4>
+                        <ul class="summary-list">
+                          <li><strong>Status:</strong> {{ s.sections[2].formData['status_rating'] || '---' }}</li>
+                          <li><strong>Summary:</strong> {{ s.sections[2].formData['summary_text'] || 'Pending
+                            synthesis...' }}</li>
+                          <li><strong>What Next:</strong>
+                            <div class="sub-list" *ngIf="getAggregatedWhatNext(s) as items">
+                              <ul class="mini-list" *ngIf="items.length > 0">
+                                <li *ngFor="let item of items">
+                                  <markdown [data]="item"></markdown>
+                                </li>
+                              </ul>
+                              <span *ngIf="items.length === 0">Pending synthesis...</span>
+                            </div>
+                          </li>
+                          <li><strong>Timeline:</strong> {{ s.sections[2].formData['timeline'] || '---' }}</li>
+                          <li><strong>Time Spent:</strong> {{ s.sections[2].formData['time_spent'] || '---' }}</li>
+                        </ul>
+                      </div>
+                      <div class="summary-box blue-box">
+                        <div class="meta-item"><strong>Project Name:</strong> {{ s.sections[0].formData['project_name']
+                          || '---' }}</div>
+                        <div class="meta-item"><strong>Content:</strong> {{ s.title }}</div>
+                        <div class="meta-item"><strong>By:</strong> {{ s.sections[0].formData['report_by'] || '---' }}
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Removed 1.1 Overall Status (Conditional Merging) to avoid duplicates -->
+                  </div>
+
+                  <!-- Standard Section Content (Progress, QA, etc) AND Status -->
+                  <div class="section-body" *ngIf="section.id !== 'intro' && section.id !== 'metadata'">
+                    
+                    <!-- If Status Section, use specialized layout -->
+                    <div class="sub-section-merged" *ngIf="section.id === 'status'">
+                      <h4 class="sub-h4">1.1 Overall Status</h4>
+                      <div class="status-indicator">
+                        Status – <span [class.delayed]="section.formData['status_rating'] === 'Delayed'"
+                          [class.ontrack]="section.formData['status_rating'] === 'On Track'">
+                          {{ section.formData['status_rating'] || '---' }}
+                        </span>
+                      </div>
+                      <div class="sub-content" *ngIf="section.aiDraft || section.userOverride || section.formData['summary_text']">
+                        <markdown [data]="section.userOverride ?? section.aiDraft || section.formData['summary_text']"></markdown>
+                      </div>
+                    </div>
+
+                    <!-- Otherwise use standard Editor -->
+                    <div class="editor-block" contenteditable="true" (input)="onTextEdit(section.id, $event)"
+                      (focus)="setActiveSection(i)" [class.thinking]="section.isThinking"
+                      *ngIf="section.id !== 'status' && (section.aiDraft || section.userOverride)">
+                      <markdown [data]="shouldBreakIssues(s) && section.id === 'issues' ? getSplitIssues(s, 1) : (section.userOverride ?? section.aiDraft)"></markdown>
+                    </div>
+                  </div>
+
+                  <div *ngIf="section.isThinking" class="thinking-overlay">
+                    <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+                    <span>Adept AI is thinking...</span>
+                  </div>
+
+                  <div *ngIf="!section.aiDraft && !section.userOverride && !section.isThinking" class="placeholder"
+                    (click)="setActiveSection(i)">
+                    <ng-container *ngIf="getRoughNotes(section) as notes; else emptyInstruction">
+                      <div class="live-notes-preview">
+                        <span class="preview-badge-mini">LIVE NOTES (Pending Synthesis)</span>
+                        <div class="notes-content">{{ notes }}</div>
+                      </div>
+                    </ng-container>
+                    <ng-template #emptyInstruction>
+                      <div class="insufficient-data-alert">
+                        <mat-icon>info_outline</mat-icon>
+                        <span>Strategic guidance for '{{ section.title }}' will be synthesized once input is provided...</span>
+                      </div>
+                    </ng-template>
+                  </div>
+                </div>
+                <div class="branded-paper-footer">
+                  <div class="footer-meta" *ngIf="getMetadata(s) as meta">
+                    <span>{{ meta.project }} | {{ meta.date }}</span>
+                    <span class="page-num">Page {{ getTOCPage(s.sections, i) }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ISSUES OVERFLOW PART 2 -->
+              <ng-container *ngIf="shouldBreakIssues(s) && section.id === 'issues'">
+                <div class="page-break-line"><span>PAGE BREAK</span></div>
+                <div class="doc-page content-page overflow-page">
+                  <div class="running-header" *ngIf="getMetadata(s) as meta">
+                    <span>{{ meta.project }} | {{ meta.type }}</span>
+                    <span class="rh-date">{{ meta.date }}</span>
+                  </div>
+                  <div class="paper-section">
+                    <div class="section-header">
+                      <h4>{{ getTOCIndex(s.sections, i) }}. {{ section.title }} (Continued)</h4>
+                    </div>
+                    <div class="editor-block">
+                      <markdown [data]="getSplitIssues(s, 2)"></markdown>
+                    </div>
+                  </div>
+                  <div class="branded-paper-footer">
+                    <div class="footer-meta" *ngIf="getMetadata(s) as meta">
+                      <span>{{ meta.project }} | {{ meta.date }}</span>
+                      <span class="page-num">Page {{ getTOCPage(s.sections, i) + 1 }}</span>
                     </div>
                   </div>
                 </div>
+              </ng-container>
 
-                <!-- THE EDITOR (Controlled ContentEditable) -->
-                <div class="editor-block" contenteditable="true" (input)="onTextEdit(section.id, $event)"
-                  (focus)="setActiveSection(i)" [class.thinking]="section.isThinking" 
-                  *ngIf="section.aiDraft || section.userOverride">
-                  {{ section.userOverride ?? section.aiDraft }}
-                </div>
-                
-                <div *ngIf="section.isThinking" class="thinking-overlay">
-                  <mat-progress-bar mode="indeterminate"></mat-progress-bar>
-                  <span>Adept AI is thinking...</span>
-                </div>
-                
-                <div *ngIf="!section.aiDraft && !section.userOverride && !section.isThinking" class="placeholder" (click)="setActiveSection(i)">
-                  <ng-container *ngIf="getRoughNotes(section) as notes; else emptyInstruction">
-                    <div class="live-notes-preview">
-                      <span class="preview-badge-mini">LIVE NOTES (Pending Synthesis)</span>
-                      <pre class="notes-content">{{ notes }}</pre>
+              <!-- INTRO OVERFLOW PART 2 -->
+              <ng-container *ngIf="shouldSplitIntro(s) && section.id === 'intro'">
+                <div class="page-break-line"><span>PAGE BREAK</span></div>
+                <div class="doc-page content-page overflow-page">
+                  <div class="running-header" *ngIf="getMetadata(s) as meta">
+                    <span>{{ meta.project }} | {{ meta.type }}</span>
+                    <span class="rh-date">{{ meta.date }}</span>
+                  </div>
+                  <div class="paper-section">
+                    <div class="section-header">
+                      <h4>1. Introduction (Continued)</h4>
                     </div>
-                  </ng-container>
-                  <ng-template #emptyInstruction>
-                    <em>Complete '{{ section.title }}' draft will appear here...</em>
-                  </ng-template>
+                    <div class="editor-block" *ngIf="section.aiDraft || section.userOverride">
+                      <markdown [data]="getSplitIntro(s, 2)"></markdown>
+                    </div>
+                  </div>
+                  <div class="branded-paper-footer">
+                    <div class="footer-meta" *ngIf="getMetadata(s) as meta">
+                      <span>{{ meta.project }} | {{ meta.date }}</span>
+                      <span class="page-num">Page {{ getTOCPage(s.sections, i) + 1 }}</span>
+                    </div>
+                  </div>
                 </div>
+              </ng-container>
 
-                <mat-divider></mat-divider>
+
+              <!-- Page Break for Preview -->
+              <div class="page-break-line"
+                *ngIf="section.id !== 'metadata' && section.id !== 'status' && hasVisibleSectionAfter(s.sections, i)">
+                <span>PAGE BREAK</span>
               </div>
             </ng-container>
-
-            <div class="branded-paper-footer">
-              <img [src]="brandFooter" alt="Adept Footer">
-            </div>
           </div>
         </div>
 
@@ -287,20 +411,32 @@
           <div class="insight-grid">
             <div class="insight-col" *ngIf="s.analysis.inconsistencies.length">
               <span class="label error">Inconsistencies</span>
-              <ul>
-                <li *ngFor="let item of s.analysis.inconsistencies">{{ item }}</li>
+              <ul class="insight-list">
+                <li *ngFor="let item of s.analysis.inconsistencies" class="insight-item clickable"
+                  (click)="jumpToFix(item.target_id)">
+                  <mat-icon>error_outline</mat-icon>
+                  <span>{{ item.text }}</span>
+                </li>
               </ul>
             </div>
             <div class="insight-col" *ngIf="s.analysis.risks.length">
               <span class="label warning">Risks Detected</span>
-              <ul>
-                <li *ngFor="let item of s.analysis.risks">{{ item }}</li>
+              <ul class="insight-list">
+                <li *ngFor="let item of s.analysis.risks" class="insight-item clickable"
+                  (click)="jumpToFix(item.target_id)">
+                  <mat-icon>warning_amber</mat-icon>
+                  <span>{{ item.text }}</span>
+                </li>
               </ul>
             </div>
             <div class="insight-col" *ngIf="s.analysis.suggestions.length">
               <span class="label info">Suggestions</span>
-              <ul>
-                <li *ngFor="let item of s.analysis.suggestions">{{ item }}</li>
+              <ul class="insight-list">
+                <li *ngFor="let item of s.analysis.suggestions" class="insight-item clickable"
+                  (click)="jumpToFix(item.target_id)">
+                  <mat-icon>lightbulb_outline</mat-icon>
+                  <span>{{ item.text }}</span>
+                </li>
               </ul>
             </div>
           </div>
@@ -323,12 +459,13 @@
   </div>
 
   <!-- ===== FULL-SCREEN PREVIEW OVERLAY ===== -->
-  <div class="preview-overlay" tabindex="-1" #previewOverlay *ngIf="showPreview() && state() as s" (keydown.escape)="closePreview()">
+  <div class="preview-overlay" tabindex="-1" #previewOverlay *ngIf="showPreview() && state() as s"
+    (keydown.escape)="closePreview()">
 
     <!-- Toolbar -->
     <div class="preview-toolbar">
       <div class="preview-toolbar-left">
-        <img [src]="brandLogo" class="preview-brand-logo" alt="Adept">
+        <img [src]="brandLogoUi" class="preview-brand-logo" alt="Adept">
         <div class="preview-toolbar-meta">
           <span class="preview-label">Document Preview</span>
           <span class="preview-report-title">{{ getDisplayTitle(s) }}</span>
@@ -345,92 +482,206 @@
       </div>
     </div>
 
-    <!-- Scrollable document canvas -->
+    <!-- Scrollable Canvas -->
     <div class="preview-canvas">
-
-      <!-- Sidebar decoration -->
       <img [src]="brandSidebar" class="preview-sidebar-bar" alt="">
 
-      <!-- COVER PAGE -->
-      <div class="prev-page cover-page">
+      <!-- Cover Page -->
+      <div class="doc-page cover-page">
         <div class="cover-content">
-          <img [src]="brandLogo" class="cover-logo" alt="Adept Logo">
+          <img [src]="brandLogo" class="cover-logo" alt="Adept">
           <h1 class="cover-title">{{ (getDisplayTitle(s) || '').toUpperCase() }}</h1>
           <p class="cover-date">{{ currentMonthYear }}</p>
+
         </div>
         <div class="branded-paper-footer">
           <img [src]="brandFooter" alt="Adept Footer">
         </div>
       </div>
 
-      <!-- PAGE BREAK -->
       <div class="page-break-line"><span>PAGE BREAK</span></div>
 
-      <!-- TABLE OF CONTENTS -->
-      <div class="prev-page toc-page">
+      <!-- TOC -->
+      <div class="doc-page toc-page">
+        <div class="running-header" *ngIf="getMetadata(s) as meta">
+          <span>{{ meta.project }} | {{ meta.type }}</span>
+          <span class="rh-date">{{ meta.date }}</span>
+        </div>
         <h2 class="toc-title">TABLE OF CONTENTS</h2>
         <div class="toc-list">
-          <div class="toc-item" *ngFor="let section of s.sections; let i = index">
-            <span class="t-num">{{ i + 1 }}.</span>
-            <span class="t-label">{{ section.title }}</span>
-            <span class="t-dots"></span>
-            <span class="t-page">{{ i + 3 }}</span>
-          </div>
+          <ng-container *ngFor="let section of s.sections; let i = index">
+            <div class="toc-item" *ngIf="section.id !== 'metadata'">
+              <span class="t-num">{{ getTOCIndex(s.sections, i) }}.</span>
+              <span class="t-label">{{ section.title }}</span>
+              <span class="t-dots"></span>
+              <span class="t-page">{{ getTOCPage(s.sections, i) }}</span>
+            </div>
+          </ng-container>
         </div>
         <div class="branded-paper-footer">
-          <img [src]="brandFooter" alt="Adept Footer">
+          <div class="footer-meta" *ngIf="getMetadata(s) as meta">
+            <span>{{ meta.project }} | {{ meta.date }}</span>
+            <span class="page-num">Page 2</span>
+          </div>
         </div>
       </div>
-
-      <!-- PAGE BREAK -->
       <div class="page-break-line"><span>PAGE BREAK</span></div>
 
-      <!-- CONTENT HEADER + SUMMARY BOXES -->
-      <div class="prev-page content-header">
-        <div class="underlined-header">
-          <h2>{{ getDisplayTitle(s) }}</h2>
-        </div>
-        <div class="summary-boxes" *ngIf="s.type === 'sprint'">
-          <div class="box orange-box">
-            <h4>This Sprint's Summary:</h4>
-            <ul>
-              <li><strong>Status:</strong> {{ s.sections[1].formData['status_rating'] || '[Overall Status]' }}</li>
-              <li><strong>Summary:</strong> {{ s.sections[1].formData['summary_text'] || '[High-Level Summary]' }}</li>
-              <li><strong>Timeline:</strong> {{ s.sections[1].formData['timeline'] || '[Timeline]' }}</li>
-              <li><strong>Time Spent:</strong> {{ s.sections[1].formData['time_spent'] || '[Time Spent]' }}</li>
-            </ul>
-          </div>
-          <div class="box teal-box">
-            <h4>Project Info:</h4>
-            <div class="info-row"><strong>Project{{ !s.sections[0].formData['project_name'] ? '*' : '' }}:</strong> {{
-              s.sections[0].formData['project_name'] || '[Project Name]' }}</div>
-            <div class="info-row"><strong>Content:</strong> {{ getDisplayTitle(s) }}</div>
-            <div class="info-row"><strong>By{{ !s.sections[0].formData['report_by'] ? '*' : '' }}:</strong> {{
-              s.sections[0].formData['report_by'] || '[Prepared By]' }}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SECTION PAGES -->
+      <!-- Main Sections -->
       <ng-container *ngFor="let section of s.sections; let i = index">
-        <div class="prev-page section-page" *ngIf="section.id !== 'metadata'">
-          <div class="section-header">
-            <h4>{{ section.title }}</h4>
+        <div class="doc-page content-page" *ngIf="section.id !== 'metadata'" [id]="'preview-render-' + section.id">
+          <div class="running-header" *ngIf="getMetadata(s) as meta">
+            <span>{{ meta.project }} | {{ meta.type }}</span>
+            <span class="rh-date">{{ meta.date }}</span>
           </div>
-          <div class="section-body">
-            <p *ngIf="section.userOverride ?? section.aiDraft; else emptyBlock">{{ section.userOverride ??
-              section.aiDraft }}</p>
-            <ng-template #emptyBlock>
-              <p class="empty-section"><em>No content yet. Fill the form and click Draft with AI.</em></p>
-            </ng-template>
-          </div>
-          <div class="branded-paper-footer" *ngIf="i === s.sections.length - 1">
-            <img [src]="brandFooter" alt="Adept Footer">
+
+          <div class="paper-section">
+            <div class="section-header" *ngIf="section.id !== 'intro'">
+              <h4>{{ getTOCIndex(s.sections, i) }}. {{ section.title }}</h4>
+            </div>
+
+            <!-- Specialized Intro -->
+            <div class="intro-layout" *ngIf="section.id === 'intro'">
+              <div class="section-header">
+                <h4>{{ getTOCIndex(s.sections, i) }}. {{ section.title }}</h4>
+              </div>
+              <div class="project-phase" *ngIf="s.sections[0].formData['sprint_no']">
+                <strong>Sprint Goal:</strong> Sprint {{ s.sections[0].formData['sprint_no'] }} – {{
+                s.sections[0].formData['sprint_goal'] || 'Strategic Growth' }}
+              </div>
+
+              <div class="summary-grid">
+                <div class="summary-box orange-box">
+                  <h4>This Sprint's Summary:</h4>
+                  <ul class="summary-list">
+                    <li><strong>Status:</strong> {{ s.sections[2].formData['status_rating'] || '---' }}</li>
+                    <li><strong>Summary:</strong> {{ s.sections[2].formData['summary_text'] || '---' }}</li>
+                    <li><strong>What Next:</strong>
+                      <div class="sub-list" *ngIf="getAggregatedWhatNext(s) as items">
+                        <ul class="mini-list" *ngIf="items.length > 0">
+                          <li *ngFor="let item of items">
+                            <markdown [data]="item"></markdown>
+                          </li>
+                        </ul>
+                        <span *ngIf="items.length === 0">Pending synthesis...</span>
+                      </div>
+                    </li>
+                  </ul>
+                </div>
+                <div class="summary-box blue-box">
+                  <div class="meta-item"><strong>Project Name:</strong> {{ s.sections[0].formData['project_name'] ||
+                    '---'
+                    }}</div>
+                  <div class="meta-item"><strong>Content:</strong> {{ s.title }}</div>
+                  <div class="meta-item"><strong>By:</strong> {{ s.sections[0].formData['report_by'] || '---' }}</div>
+                </div>
+              </div>
+
+              <!-- Removed 1.1 Overall Status (Conditional Merging) -->
+            </div>
+
+            <!-- Standard Section Content -->
+            <div class="section-body" *ngIf="section.id !== 'intro' && section.id !== 'metadata'">
+              
+              <!-- If Status Section, use specialized layout -->
+              <div class="sub-section-merged" *ngIf="section.id === 'status'">
+                <h4 class="sub-h4">1.1 Overall Status</h4>
+                <div class="status-indicator">
+                  Status – <span [class.delayed]="section.formData['status_rating'] === 'Delayed'"
+                    [class.ontrack]="section.formData['status_rating'] === 'On Track'">
+                    {{ section.formData['status_rating'] || '---' }}
+                  </span>
+                </div>
+                <div class="sub-content" *ngIf="section.aiDraft || section.userOverride || section.formData['summary_text']; else emptyStatus">
+                  <markdown [data]="section.userOverride ?? section.aiDraft || section.formData['summary_text']"></markdown>
+                </div>
+                <ng-template #emptyStatus>
+                  <div class="empty-section-placeholder">
+                    <div class="placeholder-line"></div>
+                    <div class="placeholder-text">Strategic status summary will be generated here...</div>
+                    <div class="placeholder-line short"></div>
+                  </div>
+                </ng-template>
+              </div>
+
+              <!-- Otherwise use standard Markdown -->
+              <div class="sub-section-merged" *ngIf="section.id !== 'status' && (section.aiDraft || section.userOverride); else mainEmptyState">
+                <markdown [data]="shouldBreakIssues(s) && section.id === 'issues' ? getSplitIssues(s, 1) : (section.userOverride ?? section.aiDraft)"></markdown>
+              </div>
+              <ng-template #mainEmptyState>
+                <div class="empty-section-placeholder" *ngIf="section.id !== 'status'">
+                  <div class="placeholder-line"></div>
+                  <div class="placeholder-text">Strategic guidance for '{{ section.title }}' will be synthesized once input is provided...</div>
+                  <div class="placeholder-line short"></div>
+                </div>
+              </ng-template>
+            </div>
+
+          </div> <!-- paper-section -->
+          <div class="branded-paper-footer">
+            <div class="footer-meta" *ngIf="getMetadata(s) as meta">
+              <span>{{ meta.project }} | {{ meta.date }}</span>
+              <span class="page-num">Page {{ getTOCPage(s.sections, i) }}</span>
+            </div>
           </div>
         </div>
-      </ng-container>
 
+        <!-- ISSUES OVERFLOW PART 2 (Preview) -->
+        <ng-container *ngIf="shouldBreakIssues(s) && section.id === 'issues'">
+          <div class="page-break-line"><span>PAGE BREAK</span></div>
+          <div class="doc-page content-page overflow-page">
+            <div class="running-header" *ngIf="getMetadata(s) as meta">
+              <span>{{ meta.project }} | {{ meta.type }}</span>
+              <span class="rh-date">{{ meta.date }}</span>
+            </div>
+            <div class="paper-section">
+              <div class="section-header">
+                <h4>{{ getTOCIndex(s.sections, i) }}. {{ section.title }} (Continued)</h4>
+              </div>
+              <div class="sub-section-merged">
+                <markdown [data]="getSplitIssues(s, 2)"></markdown>
+              </div>
+            </div>
+            <div class="branded-paper-footer">
+              <div class="footer-meta" *ngIf="getMetadata(s) as meta">
+                <span>{{ meta.project }} | {{ meta.date }}</span>
+                <span class="page-num">Page {{ getTOCPage(s.sections, i) + 1 }}</span>
+              </div>
+            </div>
+          </div>
+        </ng-container>
+
+        <!-- INTRO OVERFLOW PART 2 -->
+        <ng-container *ngIf="shouldSplitIntro(s) && section.id === 'intro'">
+          <div class="page-break-line"><span>PAGE BREAK</span></div>
+          <div class="doc-page content-page overflow-page">
+            <div class="running-header" *ngIf="getMetadata(s) as meta">
+              <span>{{ meta.project }} | {{ meta.type }}</span>
+              <span class="rh-date">{{ meta.date }}</span>
+            </div>
+            <div class="paper-section">
+              <div class="section-header">
+                <h4>1. Introduction (Continued)</h4>
+              </div>
+              <div class="sub-section-merged" *ngIf="section.aiDraft || section.userOverride">
+                <markdown [data]="getSplitIntro(s, 2)"></markdown>
+              </div>
+            </div>
+            <div class="branded-paper-footer">
+              <div class="footer-meta" *ngIf="getMetadata(s) as meta">
+                <span>{{ meta.project }} | {{ meta.date }}</span>
+                <span class="page-num">{{ getTOCPage(s.sections, i) + 1 }}</span>
+              </div>
+            </div>
+          </div>
+        </ng-container>
+
+
+          <div class="page-break-line"
+            *ngIf="section.id !== 'metadata' && section.id !== 'status' && hasVisibleSectionAfter(s.sections, i)">
+            <span>PAGE BREAK</span>
+          </div>
+      </ng-container>
     </div>
   </div>
-
 </app-base-layout>
