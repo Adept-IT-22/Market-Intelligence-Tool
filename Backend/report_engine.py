@@ -15,6 +15,8 @@ from datetime import datetime
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from docxtpl import DocxTemplate
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 # from agent_manager import call_gemini_sync # Moved to methods to prevent import stall
 
 logger = logging.getLogger(__name__)
@@ -253,15 +255,9 @@ class ReportAutomationEngine:
             
             # Prompt Gemini
             from agent_manager import call_gemini_sync
-            # Calculate section index matching the frontend's strategic numbering logic
+            # Calculate section index starting with 1 at the Introduction
             # metadata (0), intro (1), status (2), progress (3)...
-            if section_id == 'intro':
-                section_index = 1
-            elif section_id == 'status':
-                section_index = 1 # Will result in 1.1, 1.2
-            else:
-                # Sections from index 3 onwards are numbered 2, 3, 4...
-                section_index = config['sections'].index(section) - 1
+            section_index = config['sections'].index(section)
                 
             prompt = f"""
             You are the Adept Report Synthesizer.
@@ -278,16 +274,16 @@ class ReportAutomationEngine:
             1. Use professional, active voice.
             2. Follow the tone and formatting logic found in the guidelines.
             3. Use systematic sub-section numbering: {section_index}.1, {section_index}.2, etc. 
-               EVERY major topic (e.g., "Status", "Summary", "What Next", "Timeline") MUST be a numbered sub-heading, not a bullet point.
-            4. Use Markdown Tables for data that benefits from structured comparison (e.g., Progress vs. Target, Status Metrics, Task Lists).
+               EVERY major topic MUST be a numbered sub-heading, not a bullet point.
+            4. Use Markdown Tables for data that benefits from structured comparison. Ensure tables are clear and spacious.
             5. Ensure the table headers are concise and professional.
             
             --- CRITICAL FORMATTING RULES ---
             - NO Markdown headers (#). Use the {section_index}.X numbering for headings.
             - Bolding is allowed for the numbered sub-headings (e.g. **{section_index}.1 Summary**).
             - Do NOT include the main section title ({section['title']}).
-            - Use a single newline between paragraphs.
-            - Ensure tables have a header row.
+            - Use double newlines between sub-sections to ensure breathing room in Word.
+            - Ensure tables have a header row and are not overly wide.
             """
             
             logger.info(f"Generating section: {section['title']}")
@@ -387,10 +383,14 @@ class ReportAutomationEngine:
         if report_type not in REPORT_TYPES or action not in REPORT_TYPES[report_type]["transformations"]:
             raise ValueError(f"Invalid report type {report_type} or action {action}")
 
-        transformation_instr = REPORT_TYPES[report_type]["transformations"][action]
-        section_meta = next((s for s in REPORT_TYPES[report_type]["sections"] if s["id"] == section_id), None)
+        # Calculate section index starting with 1 at the Introduction
+        config = REPORT_TYPES[report_type]
+        transformation_instr = config["transformations"][action]
+        section_meta = next((s for s in config["sections"] if s["id"] == section_id), None)
         if not section_meta:
             raise ValueError(f"Section {section_id} not found in report type {report_type}")
+
+        section_index = config['sections'].index(section_meta)
         
         # Retrieve context again (or we could pass it from frontend)
         context = self.retrieve_filtered_context(section_meta.get('retrieval_query', section_id), doc_type="guideline")
@@ -409,7 +409,10 @@ class ReportAutomationEngine:
         
         --- TASK ---
         Apply the requested action to the text while strictly adhering to Adept's professional tone. 
-        Ensure all key data points from the original text are preserved.
+        1. Preserve all key data points.
+        2. Ensure sub-section numbering is maintained: {section_index}.1, {section_index}.2, etc.
+        3. NEVER use bullet points (*) for major sub-headings. ALWAYS use the {section_index}.X format.
+        4. Maintain double-newlines between topics for clarity.
         """
         
         from agent_manager import call_gemini_sync
@@ -533,6 +536,20 @@ class ReportAutomationEngine:
         try:
             doc = DocxTemplate(template_path)
             doc.render(rich_context)
+
+            # Force Word to update fields (like TOC) on open
+            doc.settings.element.find(qn('w:updateFields')).set(qn('w:val'), 'true')
+
+            # --- Footer Suppression for Cover Page ---
+            # Word documents are split into sections. Usually, the cover is in the first section.
+            if doc.sections:
+                first_section = doc.sections[0]
+                first_section.different_first_page_header_footer = True
+                # Clear footer for the first page if it exists
+                first_section.footer.is_linked_to_previous = False
+                for p in first_section.footer.paragraphs:
+                    p.text = ""
+
             doc.save(output_path)
             return True
         except Exception as e:

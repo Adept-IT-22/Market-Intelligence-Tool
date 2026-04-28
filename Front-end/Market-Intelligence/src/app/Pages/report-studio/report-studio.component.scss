@@ -277,7 +277,7 @@
   }
 
   .auto-fill-container {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--border-color);
 
     .magic-btn {
       width: 100%;
@@ -294,18 +294,19 @@
       transition: background 0.2s;
 
       &:hover {
-        background: rgba(124, 58, 237, 0.05);
+        background: rgba(124, 58, 237, 0.08);
       }
 
       &.active-btn {
-        background: rgba(124, 58, 237, 0.1);
-        border-bottom: 1px solid rgba(124, 58, 237, 0.2);
+        background: rgba(124, 58, 237, 0.12);
+        border-bottom: 1px solid var(--accent-primary);
       }
     }
 
     .auto-fill-panel {
       padding: 16px 24px;
-      background: rgba(0, 0, 0, 0.2);
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
 
       p {
         color: var(--text-muted);
@@ -315,8 +316,8 @@
 
       textarea {
         width: 100%;
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
         color: var(--text-primary);
         padding: 12px;
         border-radius: 8px;
@@ -556,45 +557,87 @@
     }
   }
 
-  /* Consulting-Grade Sharp Tables */
+  /* --- PREMIUM CARD-STYLE TABLES --- */
   table {
     width: 100%;
-    border-collapse: collapse;
-    margin: 20px 0;
-    font-size: 0.85rem;
-    border: 1.5px solid #111; // Sharp black outer border
+    border-collapse: separate;
+    border-spacing: 0 16px; // Generous vertical gap between row-cards
+    margin: 32px 0;
+    font-size: 0.95rem;
 
     th {
-      background: #f1f5f9; // Professional light gray
-      color: #0f172a;
+      background: transparent;
+      color: #1d4e89;
       font-weight: 800;
       text-align: left;
-      padding: 10px 14px;
-      border-bottom: 1.5px solid #111;
-      border-right: 1px solid #111;
+      padding: 8px 24px;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.1em;
+      font-size: 0.75rem;
+      border-bottom: 2px solid #e2e8f0;
+    }
 
-      &:last-child {
-        border-right: none;
+    tr {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+      transition: all 0.2s ease;
+      
+      &:hover {
+        transform: translateY(-2px);
+        td { background: #f1f5f9; }
       }
     }
 
     td {
-      padding: 10px 14px;
+      padding: 24px; // Extra padding for breathable feel
+      background: #f8fafc;
+      border-top: 1px solid #e2e8f0;
       border-bottom: 1px solid #e2e8f0;
-      border-right: 1px solid #111;
       color: #334155;
       vertical-align: top;
+      line-height: 1.6;
+
+      &:first-child {
+        border-left: 1px solid #e2e8f0;
+        border-radius: 12px 0 0 12px;
+        min-width: 140px; // Ensure label column doesn't squash
+      }
 
       &:last-child {
-        border-right: none;
+        border-right: 1px solid #e2e8f0;
+        border-radius: 0 12px 12px 0;
       }
     }
+  }
 
-    tr:last-child td {
-      border-bottom: none;
-    }
+  /* --- SECTION LABELS --- */
+  h4 {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #1d4e89;
+    margin: 56px 0 24px; // Even more air between topics
+    padding: 14px 24px;
+    background: #f1f5f9;
+    border-radius: 10px;
+    border-left: 5px solid #1d4e89;
+    display: flex;
+    align-items: center;
+    line-height: 1;
+  }
+
+  h5 {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #374151;
+    margin: 36px 0 20px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  p {
+    margin-bottom: 24px;
+    line-height: 1.8;
   }
   /* Cover Page Metadata Styling */
   .cover-metadata {
@@ -779,11 +822,7 @@
 .sub-section-merged {
   margin-top: 32px;
   font-family: 'Outfit', sans-serif;
-  background: #f8fafc; // Subtle professional gray-blue
-  border: 1px solid #e2e8f0;
-  border-left: 4px solid #1d4e89; // Brand blue accent
-  padding: 24px;
-  border-radius: 4px;
+  padding: 0; // Remove padding as we'll use margins on children
   position: relative;
 
   .sub-h4 {
@@ -1421,95 +1460,122 @@
     }
   }
 
-  .summary-grid {
-    display: flex;
-    gap: 20px;
+  .bento-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-auto-rows: minmax(100px, auto);
+    gap: 16px;
     margin-bottom: 40px;
-    align-items: stretch;
 
-    .summary-box {
-      padding: 24px;
+    .bento-card {
+      padding: 20px;
       border-radius: 12px;
       color: white;
       box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-      flex: 1;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.2s, box-shadow 0.2s;
+
+      &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+      }
 
       h4 {
-        margin: 0 0 16px;
-        font-size: 1.1rem;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        color: white;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-        padding-bottom: 8px;
+        margin: 0 0 12px !important;
+        font-size: 0.9rem !important;
+        font-weight: 800 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.5px !important;
+        color: rgba(255, 255, 255, 0.9) !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important;
+        padding: 0 0 8px 0 !important;
+        background: transparent !important;
+        border-left: none !important;
+        display: block !important;
+        line-height: 1.2 !important;
       }
 
-      .summary-list {
-        margin: 0;
-        padding: 0;
-        list-style: none;
-
-        li {
-          margin-bottom: 12px;
-          font-size: 0.95rem;
-          line-height: 1.5;
-
-          strong {
-            font-weight: 800;
-            opacity: 0.9;
-          }
-
-          .sub-list {
-            margin-top: 8px;
-            padding-left: 12px;
-            border-left: 2px solid rgba(255, 255, 255, 0.3);
-            
-            .mini-list {
-              margin: 4px 0 0 0;
-              padding-left: 14px;
-              list-style-type: disc;
-              
-              li {
-                margin-bottom: 4px;
-                font-size: 0.9rem;
-                opacity: 0.95;
-                
-                &:last-child { margin-bottom: 0; }
-
-                ::ng-deep markdown {
-                  p { margin: 0; display: inline; }
-                  ul { margin: 0; }
-                }
-              }
-            }
-            
-            ::ng-deep markdown {
-              p { margin: 0; }
-              ul { margin: 8px 0; padding-left: 18px; }
-            }
-          }
-        }
-      }
-
-      .meta-item {
-        margin-bottom: 10px;
-        font-size: 0.95rem;
-        
-        strong {
-          font-weight: 800;
-          margin-right: 4px;
-        }
-      }
-
-      &.orange-box {
-        background: #e67e22; // Professional Consulting Orange
-        flex: 1.6;
-      }
-
-      &.blue-box {
-        background: #1d4e89; // Adept Brand Blue
+      .card-content {
         flex: 1;
+        font-size: 0.9rem;
+        line-height: 1.4;
+      }
+
+      &.card-status {
+        background: #e67e22; // Orange
+        grid-column: span 1;
+        
+        .status-val {
+          font-size: 1.5rem;
+          font-weight: 900;
+          margin-top: 4px;
+        }
+      }
+
+      &.card-summary {
+        background: #1d4e89; // Blue
+        grid-column: span 2;
+        
+        p {
+          margin: 0;
+          display: -webkit-box;
+          -webkit-line-clamp: 4;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+      }
+
+      &.card-highlight {
+        background: white;
+        color: #1d4e89;
+        border: 1px solid #e2e8f0;
+        grid-column: span 1;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+
+        h4 {
+          color: #1d4e89 !important;
+          border-bottom-color: #e2e8f0 !important;
+        }
+
+        .highlight-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          margin-bottom: 8px;
+          font-weight: 500;
+          font-size: 0.85rem;
+
+          mat-icon {
+            font-size: 18px !important;
+            width: 18px !important;
+            height: 18px !important;
+            color: #10b981;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: visible !important;
+          }
+        }
+      }
+
+      &.card-meta {
+        background: #f8fafc;
+        color: #64748b;
+        border: 1px solid #e2e8f0;
+        grid-column: span 1;
+        
+        h4 {
+          color: #64748b !important;
+          border-bottom-color: #e2e8f0 !important;
+        }
+
+        .meta-line {
+          font-size: 0.85rem;
+          margin-bottom: 4px;
+          strong { color: #1e293b; }
+        }
       }
     }
   }
@@ -1541,61 +1607,12 @@
     padding: 10px 0;
     white-space: pre-wrap;
 
-    h4 {
-      font-family: 'Outfit', sans-serif;
-      font-size: 1.1rem;
-      font-weight: 800;
-      color: #111827;
-      margin: 24px 0 12px;
-    }
-
-    h5 {
-      font-family: 'Outfit', sans-serif;
-      font-size: 1rem;
-      font-weight: 700;
-      color: #374151;
-      margin: 16px 0 8px;
-    }
-
-    // Premium Table Styling
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 16px 0;
-      font-size: 0.95rem;
-
-      th {
-        background: #f3f4f6;
-        font-weight: 700;
-        text-align: left;
-        padding: 10px 16px;
-        border: 1px solid #111827;
-        color: #111827;
-        text-transform: capitalize;
-      }
-
-      td {
-        padding: 12px 16px;
-        border: 1px solid #111827;
-        color: #374151;
-        vertical-align: top;
-      }
-
-      tr:nth-child(even) {
-        background: #ffffff;
-      }
-    }
-
     strong {
       display: inline-block;
       margin-top: 8px;
       margin-bottom: 4px;
       color: #111827;
       font-weight: 800;
-    }
-
-    p {
-      margin-bottom: 16px;
     }
 
     ul,

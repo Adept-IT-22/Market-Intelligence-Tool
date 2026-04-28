@@ -262,22 +262,28 @@ export class ReportStudioComponent implements OnInit {
     this.reportService.updateUserOverride(sectionId, text);
   }
 
+  /**
+   * Automatically fixes numbering in the draft text (e.g. 1.1 -> 2.1)
+   * to ensure section sub-headers match the actual section index.
+   */
+  fixNumbering(text: string | undefined, sectionIndex: any): string {
+    if (!text) return '';
+    // If sectionIndex is a string (like from getTOCIndex), convert to int or use as prefix
+    const prefix = sectionIndex;
+    
+    // Replace any line starting with "X.Y" or "**X.Y**" where X is any digit
+    // with "Prefix.Y"
+    const regex = /^(\s*(\*\*|))(\d+)\.(\d+)/gm;
+    return text.replace(regex, `$1${prefix}.$4`);
+  }
+
   // --- Navigation & UI ---
 
   getTOCIndex(sections: any[], currentIndex: number): string {
     const currentSection = sections[currentIndex];
+    if (currentSection.id === 'metadata' || currentSection.id === 'toc') return '';
     
-    if (currentSection.id === 'status') return '1.1';
-    
-    // primarySections skips metadata and status (which is 1.1)
-    const primarySections = sections.filter(s => s.id !== 'metadata' && s.id !== 'status');
-    const idx = primarySections.findIndex(s => s.id === currentSection.id);
-    
-    if (idx >= 0) {
-      return `${idx + 1}`;
-    }
-    
-    return '';
+    return `${currentIndex}`;
   }
 
   getTOCPage(sections: any[], currentIndex: number): number {
@@ -462,6 +468,18 @@ export class ReportStudioComponent implements OnInit {
     }
     
     return combined.slice(0, 5); 
+  }
+
+  getSummaryHighlights(s: ReportState | null): string[] {
+    if (!s || !s.sections) return [];
+    const progress = s.sections.find(sec => sec.id === 'progress_detail');
+    if (!progress?.formData?.['tasks_completed']) return [];
+    
+    return String(progress.formData['tasks_completed'])
+      .split('\n')
+      .filter(t => t.trim())
+      .map(t => t.replace(/^[•\-\*\. \d–—✅]+\s*/, '').trim())
+      .slice(0, 4);
   }
 
   getSplitIntro(s: ReportState | null, part: 1 | 2): string {

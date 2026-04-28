@@ -169,11 +169,6 @@
               </div>
               <h2 class="toc-title">TABLE OF CONTENTS</h2>
               <div class="toc-list">
-                <div class="toc-item" (click)="scrollToTop()">
-                  <span class="t-label">Sprint Review Report</span>
-                  <span class="t-dots"></span>
-                  <span class="t-page">3</span>
-                </div>
                 <ng-container *ngFor="let section of s.sections; let i = index">
                   <div class="toc-item" *ngIf="section.id !== 'metadata'"
                     (click)="scrollToSection(i)">
@@ -249,32 +244,55 @@
                       s.sections[0].formData['sprint_goal'] || 'Strategic Growth' }}
                     </div>
 
-                    <div class="summary-grid">
-                      <div class="summary-box orange-box">
-                        <h4>This Sprint's Summary:</h4>
-                        <ul class="summary-list">
-                          <li><strong>Status:</strong> {{ s.sections[2].formData['status_rating'] || '---' }}</li>
-                          <li><strong>Summary:</strong> {{ s.sections[2].formData['summary_text'] || 'Pending
-                            synthesis...' }}</li>
-                          <li><strong>What Next:</strong>
-                            <div class="sub-list" *ngIf="getAggregatedWhatNext(s) as items">
-                              <ul class="mini-list" *ngIf="items.length > 0">
-                                <li *ngFor="let item of items">
-                                  <markdown [data]="item"></markdown>
-                                </li>
-                              </ul>
-                              <span *ngIf="items.length === 0">Pending synthesis...</span>
-                            </div>
-                          </li>
-                          <li><strong>Timeline:</strong> {{ s.sections[2].formData['timeline'] || '---' }}</li>
-                          <li><strong>Time Spent:</strong> {{ s.sections[2].formData['time_spent'] || '---' }}</li>
-                        </ul>
+                    <div class="bento-grid">
+                      <!-- Status Card -->
+                      <div class="bento-card card-status">
+                        <h4>Status</h4>
+                        <div class="status-val">{{ s.sections[2].formData['status_rating'] || '---' }}</div>
+                        <div class="card-content" style="margin-top: 8px; font-size: 0.8rem; opacity: 0.9;">
+                          {{ s.sections[2].formData['timeline'] || 'No timeline set' }}
+                        </div>
                       </div>
-                      <div class="summary-box blue-box">
-                        <div class="meta-item"><strong>Project Name:</strong> {{ s.sections[0].formData['project_name']
-                          || '---' }}</div>
-                        <div class="meta-item"><strong>Content:</strong> {{ s.title }}</div>
-                        <div class="meta-item"><strong>By:</strong> {{ s.sections[0].formData['report_by'] || '---' }}
+
+                      <!-- Executive Summary Card -->
+                      <div class="bento-card card-summary">
+                        <h4>Executive Summary</h4>
+                        <div class="card-content">
+                          <p>{{ s.sections[2].formData['summary_text'] || 'Strategic synthesis pending...' }}</p>
+                        </div>
+                      </div>
+
+                      <!-- Key Highlights Card -->
+                      <div class="bento-card card-highlight" *ngIf="getSummaryHighlights(s) as items">
+                        <h4>Key Accomplishments</h4>
+                        <div class="card-content">
+                          <div class="highlight-item" *ngFor="let item of items">
+                            <mat-icon>check_circle</mat-icon>
+                            <span>{{ item }}</span>
+                          </div>
+                          <div *ngIf="items.length === 0" style="opacity: 0.6; font-style: italic; font-size: 0.8rem;">
+                            No highlights extracted yet.
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- What's Next Card -->
+                      <div class="bento-card card-highlight" *ngIf="getAggregatedWhatNext(s) as nextItems">
+                        <h4>Upcoming Priorities</h4>
+                        <div class="card-content">
+                          <div class="highlight-item" *ngFor="let item of nextItems.slice(0, 3)">
+                            <mat-icon>arrow_forward</mat-icon>
+                            <span>{{ item }}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Metadata Card -->
+                      <div class="bento-card card-meta">
+                        <h4>Project Info</h4>
+                        <div class="card-content">
+                          <div class="meta-line"><strong>Project:</strong> {{ s.sections[0].formData['project_name'] || '---' }}</div>
+                          <div class="meta-line"><strong>Prepared By:</strong> {{ s.sections[0].formData['report_by'] || '---' }}</div>
                         </div>
                       </div>
                     </div>
@@ -287,7 +305,7 @@
                     
                     <!-- If Status Section, use specialized layout -->
                     <div class="sub-section-merged" *ngIf="section.id === 'status'">
-                      <h4 class="sub-h4">1.1 Overall Status</h4>
+                      <h4 class="sub-h4">{{ getTOCIndex(s.sections, i) }}.1 Overall Status</h4>
                       <div class="status-indicator">
                         Status – <span [class.delayed]="section.formData['status_rating'] === 'Delayed'"
                           [class.ontrack]="section.formData['status_rating'] === 'On Track'">
@@ -295,7 +313,7 @@
                         </span>
                       </div>
                       <div class="sub-content" *ngIf="section.aiDraft || section.userOverride || section.formData['summary_text']">
-                        <markdown [data]="section.userOverride ?? section.aiDraft || section.formData['summary_text']"></markdown>
+                        <markdown [data]="fixNumbering(section.userOverride ?? section.aiDraft || section.formData['summary_text'], getTOCIndex(s.sections, i))"></markdown>
                       </div>
                     </div>
 
@@ -303,7 +321,7 @@
                     <div class="editor-block" contenteditable="true" (input)="onTextEdit(section.id, $event)"
                       (focus)="setActiveSection(i)" [class.thinking]="section.isThinking"
                       *ngIf="section.id !== 'status' && (section.aiDraft || section.userOverride)">
-                      <markdown [data]="shouldBreakIssues(s) && section.id === 'issues' ? getSplitIssues(s, 1) : (section.userOverride ?? section.aiDraft)"></markdown>
+                      <markdown [data]="shouldBreakIssues(s) && section.id === 'issues' ? getSplitIssues(s, 1) : fixNumbering(section.userOverride ?? section.aiDraft, getTOCIndex(s.sections, i))"></markdown>
                     </div>
                   </div>
 
@@ -550,30 +568,53 @@
                 s.sections[0].formData['sprint_goal'] || 'Strategic Growth' }}
               </div>
 
-              <div class="summary-grid">
-                <div class="summary-box orange-box">
-                  <h4>This Sprint's Summary:</h4>
-                  <ul class="summary-list">
-                    <li><strong>Status:</strong> {{ s.sections[2].formData['status_rating'] || '---' }}</li>
-                    <li><strong>Summary:</strong> {{ s.sections[2].formData['summary_text'] || '---' }}</li>
-                    <li><strong>What Next:</strong>
-                      <div class="sub-list" *ngIf="getAggregatedWhatNext(s) as items">
-                        <ul class="mini-list" *ngIf="items.length > 0">
-                          <li *ngFor="let item of items">
-                            <markdown [data]="item"></markdown>
-                          </li>
-                        </ul>
-                        <span *ngIf="items.length === 0">Pending synthesis...</span>
-                      </div>
-                    </li>
-                  </ul>
+              <div class="bento-grid">
+                <!-- Status Card -->
+                <div class="bento-card card-status">
+                  <h4>Status</h4>
+                  <div class="status-val">{{ s.sections[2].formData['status_rating'] || '---' }}</div>
+                  <div class="card-content" style="margin-top: 8px; font-size: 0.8rem; opacity: 0.9;">
+                    {{ s.sections[2].formData['timeline'] || 'No timeline set' }}
+                  </div>
                 </div>
-                <div class="summary-box blue-box">
-                  <div class="meta-item"><strong>Project Name:</strong> {{ s.sections[0].formData['project_name'] ||
-                    '---'
-                    }}</div>
-                  <div class="meta-item"><strong>Content:</strong> {{ s.title }}</div>
-                  <div class="meta-item"><strong>By:</strong> {{ s.sections[0].formData['report_by'] || '---' }}</div>
+
+                <!-- Executive Summary Card -->
+                <div class="bento-card card-summary">
+                  <h4>Executive Summary</h4>
+                  <div class="card-content">
+                    <p>{{ s.sections[2].formData['summary_text'] || 'Strategic synthesis pending...' }}</p>
+                  </div>
+                </div>
+
+                <!-- Key Highlights Card -->
+                <div class="bento-card card-highlight" *ngIf="getSummaryHighlights(s) as items">
+                  <h4>Key Accomplishments</h4>
+                  <div class="card-content">
+                    <div class="highlight-item" *ngFor="let item of items">
+                      <mat-icon>check_circle</mat-icon>
+                      <span>{{ item }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- What's Next Card -->
+                <div class="bento-card card-highlight" *ngIf="getAggregatedWhatNext(s) as nextItems">
+                  <h4>Upcoming Priorities</h4>
+                  <div class="card-content">
+                    <div class="highlight-item" *ngFor="let item of nextItems.slice(0, 3)">
+                      <mat-icon>arrow_forward</mat-icon>
+                      <span>{{ item }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Metadata Card -->
+                <div class="bento-card card-meta">
+                  <h4>Project Info</h4>
+                  <div class="card-content">
+                    <div class="meta-line"><strong>Project:</strong> {{ s.sections[0].formData['project_name'] || '---' }}</div>
+                    <div class="meta-line"><strong>Prepared By:</strong> {{ s.sections[0].formData['report_by'] || '---' }}</div>
+                  </div>
                 </div>
               </div>
 
@@ -582,34 +623,11 @@
 
             <!-- Standard Section Content -->
             <div class="section-body" *ngIf="section.id !== 'intro' && section.id !== 'metadata'">
-              
-              <!-- If Status Section, use specialized layout -->
-              <div class="sub-section-merged" *ngIf="section.id === 'status'">
-                <h4 class="sub-h4">1.1 Overall Status</h4>
-                <div class="status-indicator">
-                  Status – <span [class.delayed]="section.formData['status_rating'] === 'Delayed'"
-                    [class.ontrack]="section.formData['status_rating'] === 'On Track'">
-                    {{ section.formData['status_rating'] || '---' }}
-                  </span>
+                <div class="sub-section-merged" *ngIf="section.aiDraft || section.userOverride; else mainEmptyState">
+                  <markdown [data]="shouldBreakIssues(s) && section.id === 'issues' ? getSplitIssues(s, 1) : fixNumbering(section.userOverride ?? section.aiDraft, i)"></markdown>
                 </div>
-                <div class="sub-content" *ngIf="section.aiDraft || section.userOverride || section.formData['summary_text']; else emptyStatus">
-                  <markdown [data]="section.userOverride ?? section.aiDraft || section.formData['summary_text']"></markdown>
-                </div>
-                <ng-template #emptyStatus>
-                  <div class="empty-section-placeholder">
-                    <div class="placeholder-line"></div>
-                    <div class="placeholder-text">Strategic status summary will be generated here...</div>
-                    <div class="placeholder-line short"></div>
-                  </div>
-                </ng-template>
-              </div>
-
-              <!-- Otherwise use standard Markdown -->
-              <div class="sub-section-merged" *ngIf="section.id !== 'status' && (section.aiDraft || section.userOverride); else mainEmptyState">
-                <markdown [data]="shouldBreakIssues(s) && section.id === 'issues' ? getSplitIssues(s, 1) : (section.userOverride ?? section.aiDraft)"></markdown>
-              </div>
               <ng-template #mainEmptyState>
-                <div class="empty-section-placeholder" *ngIf="section.id !== 'status'">
+                <div class="empty-section-placeholder">
                   <div class="placeholder-line"></div>
                   <div class="placeholder-text">Strategic guidance for '{{ section.title }}' will be synthesized once input is provided...</div>
                   <div class="placeholder-line short"></div>
@@ -639,7 +657,7 @@
                 <h4>{{ getTOCIndex(s.sections, i) }}. {{ section.title }} (Continued)</h4>
               </div>
               <div class="sub-section-merged">
-                <markdown [data]="getSplitIssues(s, 2)"></markdown>
+                <markdown [data]="fixNumbering(getSplitIssues(s, 2), i)"></markdown>
               </div>
             </div>
             <div class="branded-paper-footer">
@@ -664,7 +682,7 @@
                 <h4>1. Introduction (Continued)</h4>
               </div>
               <div class="sub-section-merged" *ngIf="section.aiDraft || section.userOverride">
-                <markdown [data]="getSplitIntro(s, 2)"></markdown>
+                <markdown [data]="fixNumbering(getSplitIntro(s, 2), i)"></markdown>
               </div>
             </div>
             <div class="branded-paper-footer">
