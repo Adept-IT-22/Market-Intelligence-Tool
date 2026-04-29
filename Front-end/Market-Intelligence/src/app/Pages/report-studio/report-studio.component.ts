@@ -141,7 +141,12 @@ export class ReportStudioComponent implements OnInit {
     // 7. Approvals
     this.onFormChange('next_steps', 'pending_approvals', 'Server deployment authorization\nFinal usability validation approval\nProduction environment access');
     
-    // Set Demo Drafts via service to avoid mutation issues
+    this.reportService.updateSectionDraft('intro', '#### Executive Summary\nCore system components were successfully built and integrated. However, deployment and full system validation remain incomplete, pushing critical tasks into the next sprint. The team is focusing on stabilization and environment readiness.');
+
+    this.reportService.updateSectionDraft('status', '#### Overall Status Summary\nWe are currently in a **Delayed** state due to environment provisioning bottlenecks. While technical development is 90% complete, the integration validation phase requires a stable production-like environment which is pending approval.');
+
+    this.reportService.updateSectionDraft('next_steps', '#### Required Approvals\n- **Production Environment:** Critical sign-off needed by end of week.\n- **Security Audit:** Initial findings require remediation before live deployment.\n- **User Acceptance:** Scheduled for the first week of May.');
+
     this.reportService.updateSectionDraft('progress_detail', '#### Key Accomplishments\n- **Analytics Dashboard:** Completed all UI components and partial data binding.\n- **Report Studio:** End-to-end workflow implemented (create, preview, export).\n- **API Integration:** Core frontend-backend communication endpoints are operational.');
     
     this.reportService.updateSectionDraft('next_sprint', '#### Upcoming Priorities\n- **Server Deployment:** Critical task pushed to next sprint.\n- **Advanced Models:** Integration of predictive analytics.\n- **External APIs:** Finalizing third-party data connectors.');
@@ -271,10 +276,11 @@ export class ReportStudioComponent implements OnInit {
     // If sectionIndex is a string (like from getTOCIndex), convert to int or use as prefix
     const prefix = sectionIndex;
     
-    // Replace any line starting with "X.Y" or "**X.Y**" where X is any digit
-    // with "Prefix.Y"
-    const regex = /^(\s*(\*\*|))(\d+)\.(\d+)/gm;
-    return text.replace(regex, `$1${prefix}.$4`);
+    // Replace any line starting with "X.Y" or "X.Y.Z" etc.
+    // Captures the leading bolding/spacing, the first digit (to be replaced), 
+    // and then all subsequent dots and digits.
+    const regex = /^(\s*(\*\*|))(\d+)(\.[\d\.]+)/gm;
+    return text.replace(regex, `$1${prefix}$4`);
   }
 
   // --- Navigation & UI ---
@@ -379,6 +385,25 @@ export class ReportStudioComponent implements OnInit {
     });
   }
 
+  exportReportMd() {
+    const obs = this.reportService.exportReportMd();
+    if (!obs) return;
+
+    obs.subscribe({
+      next: (blob: Blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Report_${this.selectedType()}_${new Date().toISOString().split('T')[0]}.md`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+      },
+      error: (err) => {
+        console.error('Markdown export failed:', err);
+      }
+    });
+  }
+
   setActiveSection(index: number) {
     this.activeSectionIndex.set(index);
     const s = this.state();
@@ -431,6 +456,49 @@ export class ReportStudioComponent implements OnInit {
     }).filter(v => v !== null) as string[];
 
     return values.join('\n\n');
+  }
+
+  /**
+   * Returns the best available content for a section following the truth hierarchy:
+   * userOverride → aiDraft → formatted formData → empty string
+   */
+  getSectionContent(section: any): string {
+    if (!section) return '';
+    
+    // Priority 1 & 2: AI-generated or user-edited content
+    const synthesized = section.userOverride ?? section.aiDraft;
+    if (synthesized && synthesized.trim()) return synthesized;
+    
+    // Priority 3: Fall back to raw form data, formatted as markdown
+    if (section.formData && section.id !== 'metadata') {
+      const lines: string[] = [];
+      for (const [key, value] of Object.entries(section.formData)) {
+        if (!value) continue;
+        const val = String(value).trim();
+        if (!val) continue;
+        const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        if (val.includes('\n')) {
+          lines.push(`**${label}:**`);
+          val.split('\n').filter((l: string) => l.trim()).forEach((l: string) => {
+            const trimmed = l.trim();
+            if (trimmed.match(/^[-*•✅⏳]/)) {
+              lines.push(trimmed);
+            } else {
+              lines.push(`- ${trimmed}`);
+            }
+          });
+        } else {
+          lines.push(`**${label}:** ${val}`);
+        }
+      }
+      return lines.join('\n');
+    }
+    
+    return '';
+  }
+
+  hasSectionContent(section: any): boolean {
+    return !!this.getSectionContent(section).trim();
   }
 
   getAggregatedWhatNext(s: ReportState | null): string[] {

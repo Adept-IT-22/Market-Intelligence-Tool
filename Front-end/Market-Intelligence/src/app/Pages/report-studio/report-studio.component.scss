@@ -387,8 +387,26 @@
           display: none; // Hide hints/errors to save space unless needed
         }
 
-        mat-form-field {
-          margin-bottom: 8px;
+        .mat-mdc-form-field {
+          width: 100%;
+          
+          .mdc-text-field--filled:not(.mdc-text-field--disabled) {
+            background-color: rgba(0, 0, 0, 0.03); // Subtle background
+            border: 1px solid rgba(0, 0, 0, 0.12); // Visible border
+            border-radius: 8px 8px 0 0;
+            transition: all 0.2s ease;
+
+            &:hover {
+              background-color: rgba(0, 0, 0, 0.05);
+              border-color: rgba(0, 0, 0, 0.24);
+            }
+
+            &.mdc-text-field--focused {
+              background-color: #fff;
+              border-color: var(--brand-blue);
+              box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            }
+          }
         }
       }
     }
@@ -1334,6 +1352,30 @@
         &:hover {
           background: rgba(255, 255, 255, 0.08);
           border-color: rgba(255, 255, 255, 0.5);
+        }
+      }
+
+      .btn-download-md {
+        color: #10b981;
+        border-color: rgba(16, 185, 129, 0.4);
+        font-weight: 600;
+        font-size: 0.85rem;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 20px;
+        height: 40px;
+        transition: all 0.2s;
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+
+        &:hover {
+          background: rgba(16, 185, 129, 0.1);
+          border-color: rgba(16, 185, 129, 0.8);
         }
       }
 

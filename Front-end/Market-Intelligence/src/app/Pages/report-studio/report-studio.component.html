@@ -493,6 +493,9 @@
         <button mat-stroked-button class="btn-download" (click)="exportReport()" id="preview-download-btn">
           <mat-icon>file_download</mat-icon> Download DOCX
         </button>
+        <button mat-stroked-button class="btn-download-md" (click)="exportReportMd()" id="preview-download-md-btn">
+          <mat-icon>terminal</mat-icon> Download MD
+        </button>
         <button mat-icon-button class="btn-close" (click)="closePreview()" matTooltip="Close Preview"
           id="preview-close-btn">
           <mat-icon>close</mat-icon>
@@ -623,16 +626,36 @@
 
             <!-- Standard Section Content -->
             <div class="section-body" *ngIf="section.id !== 'intro' && section.id !== 'metadata'">
-                <div class="sub-section-merged" *ngIf="section.aiDraft || section.userOverride; else mainEmptyState">
-                  <markdown [data]="shouldBreakIssues(s) && section.id === 'issues' ? getSplitIssues(s, 1) : fixNumbering(section.userOverride ?? section.aiDraft, i)"></markdown>
-                </div>
-              <ng-template #mainEmptyState>
-                <div class="empty-section-placeholder">
-                  <div class="placeholder-line"></div>
-                  <div class="placeholder-text">Strategic guidance for '{{ section.title }}' will be synthesized once input is provided...</div>
-                  <div class="placeholder-line short"></div>
-                </div>
-              </ng-template>
+
+                <!-- Status Section: Specialized layout matching workspace -->
+                <ng-container *ngIf="section.id === 'status'">
+                  <div class="sub-section-merged">
+                    <h4 class="sub-h4">{{ getTOCIndex(s.sections, i) }}.1 Overall Status</h4>
+                    <div class="status-indicator">
+                      Status – <span [class.delayed]="section.formData['status_rating'] === 'Delayed'"
+                        [class.ontrack]="section.formData['status_rating'] === 'On Track'">
+                        {{ section.formData['status_rating'] || '---' }}
+                      </span>
+                    </div>
+                    <div class="sub-content" *ngIf="hasSectionContent(section)">
+                      <markdown [data]="fixNumbering(getSectionContent(section), getTOCIndex(s.sections, i))"></markdown>
+                    </div>
+                  </div>
+                </ng-container>
+
+                <!-- All other sections: aiDraft/userOverride → formData → placeholder -->
+                <ng-container *ngIf="section.id !== 'status'">
+                  <div class="sub-section-merged" *ngIf="hasSectionContent(section); else mainEmptyState">
+                    <markdown [data]="shouldBreakIssues(s) && section.id === 'issues' ? getSplitIssues(s, 1) : fixNumbering(getSectionContent(section), i)"></markdown>
+                  </div>
+                  <ng-template #mainEmptyState>
+                    <div class="empty-section-placeholder">
+                      <div class="placeholder-line"></div>
+                      <div class="placeholder-text">Strategic guidance for '{{ section.title }}' will be synthesized once input is provided...</div>
+                      <div class="placeholder-line short"></div>
+                    </div>
+                  </ng-template>
+                </ng-container>
             </div>
 
           </div> <!-- paper-section -->

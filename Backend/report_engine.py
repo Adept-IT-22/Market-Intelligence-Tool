@@ -219,55 +219,42 @@ class ReportAutomationEngine:
     def generate_report_draft(self, report_type, answers):
         """
         Builds the report section-by-section using the Wizard answers.
-        Returns a dict of SectionState-like objects.
+        Uses Parallel Execution to generate all sections simultaneously.
         """
         if report_type not in REPORT_TYPES:
             raise ValueError(f"Unknown report type: {report_type}")
 
         config = REPORT_TYPES[report_type]
-        final_sections = {}
+        metadata = {
+            "type": report_type,
+            "title": config['title'],
+            "sections": []
+        }
 
-        for section in config['sections']:
+        # --- Helper Function for Parallel Synthesis ---
+        def process_section(section):
             section_id = section['id']
             if section_id == 'metadata':
-                # No generation needed for metadata, just pass through
-                # Keep metadata under the section id so the returned dict remains consistently keyed
-                metadata_answers = {
-                    q['id']: answers.get(q['id'], "")
-                    for q in section['questions']
-                }
-                final_sections[section_id] = {
-                    "aiDraft": "",
-                    "userOverride": None,
-                    "isEdited": False,
-                    "confidence": {"level": "High", "reason": "System Generated"},
-                    "answers": metadata_answers
-                }
-                continue
+                return section_id, None
 
-            # Fetch context for this section
+            # Retrieve context (Guidelines)
             query = section.get('retrieval_query', section['title'])
-            # We filter by 'guideline' or 'logic' to get the rules, not just any text.
             context = self.retrieve_filtered_context(query, doc_type="guideline")
+            context_text = context.get('text', "")
             
-            # Extract relevant user answers for this section
-            section_data = {q['id']: answers.get(q['id']) for q in section['questions']}
-            
-            # Prompt Gemini
-            from agent_manager import call_gemini_sync
-            # Calculate section index starting with 1 at the Introduction
-            # metadata (0), intro (1), status (2), progress (3)...
+            # Extract relevant user answers
+            section_answers = {q['id']: answers.get(q['id']) for q in section['questions']}
             section_index = config['sections'].index(section)
-                
+
             prompt = f"""
             You are the Adept Report Synthesizer.
             Your goal is to transform rough user updates into high-quality professional report content in a sharp, consulting-grade style.
             
             --- ADEPT GUIDELINES & STANDARDS ---
-            {context['text']}
+            {context_text}
             
             --- USER UPDATES FOR {section['title'].upper()} ---
-            {json.dumps(section_data, indent=2)}
+            {json.dumps(section_answers, indent=2)}
             
             --- TASK ---
             Write the {section['title']} section for the {config['title']}.
@@ -275,31 +262,51 @@ class ReportAutomationEngine:
             2. Follow the tone and formatting logic found in the guidelines.
             3. Use systematic sub-section numbering: {section_index}.1, {section_index}.2, etc. 
                EVERY major topic MUST be a numbered sub-heading, not a bullet point.
-            4. Use Markdown Tables for data that benefits from structured comparison. Ensure tables are clear and spacious.
-            5. Ensure the table headers are concise and professional.
+            4. Use Markdown Tables for structured data (CRITICAL). 
             
             --- CRITICAL FORMATTING RULES ---
             - NO Markdown headers (#). Use the {section_index}.X numbering for headings.
-            - Bolding is allowed for the numbered sub-headings (e.g. **{section_index}.1 Summary**).
-            - Do NOT include the main section title ({section['title']}).
-            - Use double newlines between sub-sections to ensure breathing room in Word.
-            - Ensure tables have a header row and are not overly wide.
+            - Bolding is allowed for the numbered sub-headings.
+            - Do NOT include the main section title anywhere in your response.
+            - Output 'N/A' for missing data.
+            - Use double newlines between sub-sections.
+            - Ensure Markdown tables are valid (correct number of pipes and dashes).
             """
             
-            logger.info(f"Generating section: {section['title']}")
-            generated_text = call_gemini_sync(prompt)
+            from agent_manager import call_gemini_sync
+            logger.info(f"Parallel Task: Generating {section['title']}")
+            ai_draft = call_gemini_sync(prompt)
             
-            # Sanitize to be 100% sure no markdown leaks through
-            clean_text = self._sanitize_markdown(generated_text)
-            
-            final_sections[section_id] = {
-                "aiDraft": clean_text,
+            return section_id, {
+                "id": section_id,
+                "title": section['title'],
+                "aiDraft": ai_draft,
                 "userOverride": None,
-                "isEdited": False,
-                "confidence": context['confidence']
+                "confidence": context.get('confidence', 0.8)
             }
 
-        return final_sections
+        # --- Parallel Execution ---
+        from concurrent.futures import ThreadPoolExecutor
+        sections_to_process = config['sections']
+        
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(process_section, sections_to_process))
+
+        # Reconstruct metadata in the exact order defined in config
+        results_map = dict(results)
+        for s in config['sections']:
+            s_id = s['id']
+            if s_id == 'metadata':
+                metadata['sections'].append({
+                    "id": "metadata",
+                    "title": "Document Information",
+                    "formData": answers
+                })
+            else:
+                metadata['sections'].append(results_map[s_id])
+
+        metadata['status'] = 'draft'
+        return metadata
 
     def parse_unstructured_notes(self, report_type, raw_text):
         """
@@ -413,6 +420,8 @@ class ReportAutomationEngine:
         2. Ensure sub-section numbering is maintained: {section_index}.1, {section_index}.2, etc.
         3. NEVER use bullet points (*) for major sub-headings. ALWAYS use the {section_index}.X format.
         4. Maintain double-newlines between topics for clarity.
+        5. If the original text contains placeholders like [mention features] and you still have no data, replace them with 'N/A'.
+        6. Do NOT include the main section title ({section_meta['title']}) in your response.
         """
         
         from agent_manager import call_gemini_sync
@@ -538,7 +547,13 @@ class ReportAutomationEngine:
             doc.render(rich_context)
 
             # Force Word to update fields (like TOC) on open
-            doc.settings.element.find(qn('w:updateFields')).set(qn('w:val'), 'true')
+            element = doc.settings.element.find(qn('w:updateFields'))
+            if element is None:
+                element = OxmlElement('w:updateFields')
+                element.set(qn('w:val'), 'true')
+                doc.settings.element.append(element)
+            else:
+                element.set(qn('w:val'), 'true')
 
             # --- Footer Suppression for Cover Page ---
             # Word documents are split into sections. Usually, the cover is in the first section.
@@ -555,6 +570,84 @@ class ReportAutomationEngine:
         except Exception as e:
             logger.error(f"Docx render error: {e}")
             raise e
+
+    def _formdata_to_markdown(self, form_data, section_config=None):
+        """
+        Converts a formData dictionary into readable Markdown text.
+        Uses the section schema to get human-readable labels.
+        """
+        if not form_data:
+            return ""
+        
+        # Build a label lookup from the schema if available
+        label_map = {}
+        if section_config:
+            for q in section_config.get('questions', []):
+                label_map[q['id']] = q['label']
+        
+        lines = []
+        for key, value in form_data.items():
+            if not value:
+                continue
+            label = label_map.get(key, key.replace('_', ' ').title())
+            val_str = str(value).strip()
+            if not val_str:
+                continue
+            
+            # Multi-line values (lists, textareas) — render as sub-content
+            if '\n' in val_str:
+                lines.append(f"**{label}:**")
+                for line in val_str.split('\n'):
+                    line = line.strip()
+                    if line:
+                        # Preserve existing bullet formatting, otherwise add one
+                        if line.startswith(('-', '*', '•', '✅', '⏳')):
+                            lines.append(line)
+                        else:
+                            lines.append(f"- {line}")
+            else:
+                lines.append(f"**{label}:** {val_str}")
+        
+        return "\n".join(lines)
+
+    def export_to_markdown(self, report_type, section_list, report_title=""):
+        """
+        Collapses the report into a single high-fidelity Markdown document.
+        Falls back to formData when no AI draft exists.
+        """
+        config = REPORT_TYPES[report_type]
+        title = report_title or config['title']
+        
+        # Build a section config lookup for label resolution
+        section_configs = {s['id']: s for s in config.get('sections', [])}
+        
+        md_lines = [
+            f"# {title.upper()}",
+            f"**Date:** {datetime.now().strftime('%d %B %Y')}",
+            "",
+            "---",
+            ""
+        ]
+        
+        for i, s in enumerate(section_list):
+            if s.get('id') == 'metadata':
+                continue
+                
+            md_lines.append(f"## {i}. {s.get('title', 'Untitled')}")
+            
+            # Priority: userOverride → aiDraft → formData → N/A
+            content = s.get('userOverride') or s.get('aiDraft') or ''
+            if not content or not content.strip():
+                form_data = s.get('formData', {})
+                sec_config = section_configs.get(s.get('id'))
+                content = self._formdata_to_markdown(form_data, sec_config)
+            
+            md_lines.append(content if content.strip() else "N/A")
+            md_lines.append("")
+            md_lines.append("---")
+            md_lines.append("")
+            
+        return "\n".join(md_lines)
 
 # Singleton instance
 engine = ReportAutomationEngine()

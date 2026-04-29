@@ -731,6 +731,37 @@ def export_report_docx():
         logger.error(f"Export failed: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/reports/export-md', methods=['POST'])
+@jwt_optional
+def export_report_markdown():
+    """
+    Export the report as a Markdown file.
+    """
+    data = request.json
+    report_type = data.get("type")
+    sections = data.get("sections", [])
+    report_title = data.get("title", "")
+
+    if not report_type or report_type not in REPORT_TYPES:
+        return jsonify({"error": "Invalid report type"}), 400
+
+    try:
+        md_content = engine.export_to_markdown(report_type, sections, report_title)
+        
+        # Return as a downloadable text file
+        from flask import Response
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        download_name = f"{timestamp}_{REPORT_TYPES[report_type]['title'].replace(' ', '_')}.md"
+        
+        return Response(
+            md_content,
+            mimetype="text/markdown",
+            headers={"Content-disposition": f"attachment; filename={download_name}"}
+        )
+    except Exception as e:
+        logger.error(f"Markdown export failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     logger.info("App starting...")
     

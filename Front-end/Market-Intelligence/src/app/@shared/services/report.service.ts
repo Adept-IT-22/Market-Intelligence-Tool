@@ -278,4 +278,15 @@ export class ReportService {
       title: state.title
     }, { responseType: 'blob' });
   }
+  
+  exportReportMd() {
+    const state = this.stateSubject.value;
+    if (!state) return null;
+
+    return this.http.post(`${this.apiUrl}/export-md`, { 
+      type: state.type, 
+      sections: state.sections,
+      title: state.title
+    }, { responseType: 'blob' });
+  }
 }
