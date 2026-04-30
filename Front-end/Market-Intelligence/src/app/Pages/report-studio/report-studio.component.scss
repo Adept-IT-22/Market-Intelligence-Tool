@@ -66,6 +66,16 @@
   padding: 8px 16px;
   min-height: 64px;
   flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+
+  .draft-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+  }
 
   .brand {
     display: flex;
