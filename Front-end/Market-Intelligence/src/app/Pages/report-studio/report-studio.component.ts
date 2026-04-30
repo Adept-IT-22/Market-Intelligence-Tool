@@ -68,7 +68,7 @@ export class ReportStudioComponent implements OnInit {
   
   // Branding Configuration
   public brandLogo = '/adept_logo.jpg';
-  public brandLogoUi = '/transparent adept logo.png';
+  public brandLogoUi = '/whiteadeptlogo.png';
   public brandSidebar = '/adept_sidebar.png';
   public brandFooter = '/adept_footer.png';
   
