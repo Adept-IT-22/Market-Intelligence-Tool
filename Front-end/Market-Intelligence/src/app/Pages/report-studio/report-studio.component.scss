@@ -380,7 +380,7 @@
       .questions {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 0 16px; // Vertical gap handled by form-field margins
+        gap: 16px 16px;
 
         .required-star {
           color: #ef4444; // red-500
