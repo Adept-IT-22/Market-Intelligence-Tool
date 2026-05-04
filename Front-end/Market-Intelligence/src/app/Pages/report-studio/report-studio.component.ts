@@ -175,29 +175,6 @@ export class ReportStudioComponent implements OnInit {
   // --- Actions ---
 
   onFormChange(sectionId: string, field: string, value: any) {
-    const s = this.state();
-    if (!s) return;
-    
-    const updatedSections = s.sections.map(sec => {
-      if (sec.id === sectionId) {
-        return {
-          ...sec,
-          formData: {
-            ...sec.formData,
-            [field]: value
-          }
-        };
-      }
-      return sec;
-    });
-
-    // We can directly update the BehaviorSubject via a new method inside reportService if we wanted fully robust abstraction, 
-    // but since state is public/readonly theoretically, we manually update the service's stateSubject via an internal method or just re-initing.
-    // For now we'll trigger a full state update. Actually, `reportService` doesn't expose a method to arbitrarily update state, so we update the local signal, but to fix the desync we must update the service state properly.
-    // However, looking at report.service.ts we added `updateUserOverride`, maybe we need `updateSectionForm`.
-    // Wait, let's fix it by adding another method in ReportService. I will just do a hacky workaround if not available, wait, let me just add it to ReportService instead inside another tool call. I'll just temporarily update the formData then I'll use ReportService when I edit it next.
-    // Or we can just use the provided ReportService instance and access `stateSubject`. Wait, `stateSubject` is private.
-    // Let's implement an emitted event. I'll update ReportService.ts right after this.
     this.reportService.updateSectionForm(sectionId, field, value);
   }
 

@@ -121,9 +121,13 @@ export class ReportService {
     return this.http.post(`${this.apiUrl}/generate`, { type, answers }).pipe(
       tap((res: any) => {
         const latestState = this.stateSubject.value;
-        if (res.success && latestState) {
+        if (res.success && latestState && res.draft) {
+          // res.draft is the metadata object which contains a 'sections' array
+          const incomingSections = res.draft.sections || [];
+          const sectionsMap = new Map<string, any>(incomingSections.map((s: any) => [s.id, s]));
+
           const updatedSections = latestState.sections.map(s => {
-            const draftData = res.draft[s.id];
+            const draftData = sectionsMap.get(s.id);
             if (draftData) {
               return {
                 ...s,
@@ -197,21 +201,35 @@ export class ReportService {
   /**
    * The 'Advisor' Layer.
    */
+  private analysisTimeout: any;
   analyzeReport() {
     const state = this.stateSubject.value;
     if (!state) return;
 
-    // Build the plain text object for analysis
-    const sectionsObj: any = {};
-    state.sections.forEach(s => {
-      sectionsObj[s.id] = s.userOverride ?? s.aiDraft;
-    });
+    // Debounce analysis to avoid spamming the backend during typing
+    if (this.analysisTimeout) clearTimeout(this.analysisTimeout);
+    
+    this.analysisTimeout = setTimeout(() => {
+      // Build the plain text object for analysis
+      const sectionsObj: any = {};
+      state.sections.forEach(s => {
+        // Use userOverride -> aiDraft -> formData fallback (simple summary of keys)
+        let content = s.userOverride ?? s.aiDraft ?? '';
+        if (!content.trim() && s.formData && s.id !== 'metadata') {
+          content = Object.entries(s.formData)
+            .filter(([_, v]) => v)
+            .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
+            .join('\n');
+        }
+        sectionsObj[s.id] = content;
+      });
 
-    this.http.post(`${this.apiUrl}/analyze`, { type: state.type, sections: sectionsObj }).subscribe((res: any) => {
-      if (res.success) {
-        this.stateSubject.next({ ...state, analysis: res.analysis });
-      }
-    });
+      this.http.post(`${this.apiUrl}/analyze`, { type: state.type, sections: sectionsObj }).subscribe((res: any) => {
+        if (res.success) {
+          this.stateSubject.next({ ...state, analysis: res.analysis });
+        }
+      });
+    }, 1000); // 1 second debounce
   }
 
   /**
@@ -227,7 +245,7 @@ export class ReportService {
         return s;
       });
       this.stateSubject.next({ ...state, sections: updatedSections });
-      // Debounced auto-save could go here
+      this.analyzeReport(); // Trigger advisor update
     }
   }
 
@@ -247,6 +265,7 @@ export class ReportService {
         return s;
       });
       this.stateSubject.next({ ...state, sections: updatedSections });
+      this.analyzeReport(); // Trigger advisor update
     }
   }
 

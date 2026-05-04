@@ -399,7 +399,7 @@
 
         .mat-mdc-form-field {
           width: 100%;
-          
+
           .mdc-text-field--filled:not(.mdc-text-field--disabled) {
             background-color: rgba(0, 0, 0, 0.03); // Subtle background
             border: 1px solid rgba(0, 0, 0, 0.12); // Visible border
@@ -477,8 +477,8 @@
     .document-scroller {
       flex: 1;
       overflow-y: auto;
-      padding: 60px 40px 300px; 
-      background: #f1f5f9; 
+      padding: 60px 40px 300px;
+      background: #f1f5f9;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -555,7 +555,8 @@
     }
 
     // Cover page or pages with brand image
-    &.has-brand-image, &:has(img) {
+    &.has-brand-image,
+    &:has(img) {
       bottom: 0;
       left: 0;
       right: 0;
@@ -608,10 +609,13 @@
     tr {
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
       transition: all 0.2s ease;
-      
+
       &:hover {
         transform: translateY(-2px);
-        td { background: #f1f5f9; }
+
+        td {
+          background: #f1f5f9;
+        }
       }
     }
 
@@ -667,6 +671,7 @@
     margin-bottom: 24px;
     line-height: 1.8;
   }
+
   /* Cover Page Metadata Styling */
   .cover-metadata {
     margin-top: 60px;
@@ -850,6 +855,7 @@
 .sub-section-merged {
   margin-top: 32px;
   font-family: 'Outfit', sans-serif;
+  font-size: 1.1 rem;
   padding: 0; // Remove padding as we'll use margins on children
   position: relative;
 
@@ -895,12 +901,18 @@
   }
 
   .sub-content {
-    font-size: 0.95rem;
+    font-size: 1.1rem;
     line-height: 1.6;
     color: #374151;
 
     p {
-      margin-bottom: 16px;
+      margin-bottom: 18px;
+      line-height: 1.7;
+
+      strong {
+        color: #0f172a;
+        font-weight: 700;
+      }
     }
 
     ul,
@@ -916,23 +928,28 @@
       }
     }
 
-    // Table Support in Sub-Content (Sharp Boxes)
+    // Table Support in Sub-Content (High-Fidelity Grid Style)
     table {
       width: 100%;
       border-collapse: collapse;
-      margin: 20px 0;
-      border: 1.5px solid #111;
+      margin: 24px 0;
+      font-family: 'Inter', sans-serif;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      overflow: hidden;
 
       th {
-        background: #f1f5f9;
-        color: #0f172a;
-        font-weight: 800;
+        background: #f8fafc;
+        color: #1e293b;
+        font-weight: 700;
         text-align: left;
-        padding: 10px 14px;
-        border-bottom: 1.5px solid #111;
-        border-right: 1px solid #111;
+        padding: 14px 16px;
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.85rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
+        border-bottom: 2px solid #e2e8f0;
+        border-right: 1px solid #e2e8f0;
 
         &:last-child {
           border-right: none;
@@ -940,18 +957,39 @@
       }
 
       td {
-        padding: 10px 14px;
-        border-bottom: 1px solid #e2e8f0;
-        border-right: 1px solid #111;
-        color: #334155;
+        padding: 14px 16px;
+        border-bottom: 1px solid #f1f5f9;
+        border-right: 1px solid #f1f5f9;
+        color: #475569;
+        font-size: 0.95rem;
+        vertical-align: middle;
+        transition: background 0.2s;
 
         &:last-child {
           border-right: none;
+        }
+
+        &:first-child {
+          font-weight: 600;
+          color: #1e293b;
+          border-left: 4px solid #1d4e89; // Branded accent
+        }
+
+        // Status pill support inside cells
+        strong {
+          color: #1d4e89;
+          font-weight: 800;
+          font-family: 'Outfit', sans-serif;
+          font-size: 0.9em;
         }
       }
 
       tr:last-child td {
         border-bottom: none;
+      }
+
+      tr:hover td {
+        background: rgba(29, 78, 137, 0.02);
       }
     }
 
@@ -983,6 +1021,26 @@
 
     li {
       margin-bottom: 8px;
+    }
+
+    blockquote {
+      margin: 24px 0;
+      padding: 16px 24px;
+      background: #f8fafc;
+      border-left: 4px solid #1d4e89;
+      border-radius: 0 8px 8px 0;
+      color: #475569;
+      font-style: italic;
+
+      p:last-child {
+        margin-bottom: 0;
+      }
+    }
+
+    hr {
+      margin: 32px 0;
+      border: none;
+      border-top: 1px solid #e2e8f0;
     }
 
     .centered-emphasis {
@@ -1205,6 +1263,17 @@
       padding: 12px;
       border-radius: 8px;
       overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(124, 58, 237, 0.2) transparent;
+
+      &::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      &::-webkit-scrollbar-thumb {
+        background: rgba(124, 58, 237, 0.2);
+        border-radius: 10px;
+      }
 
       .label {
         display: block;
@@ -1410,7 +1479,7 @@
     align-items: center;
     padding: 60px 40px 300px;
     position: relative;
-    
+
     .preview-sidebar-bar {
       position: absolute;
       left: calc(50% - 418px); // Align with A4 page edge
@@ -1503,9 +1572,9 @@
 
   .project-phase {
     margin-bottom: 24px;
-    font-size: 1rem;
+    font-size: 1.1 rem;
     color: #475569;
-    
+
     strong {
       color: #1d4e89;
       font-weight: 700;
@@ -1557,7 +1626,7 @@
       &.card-status {
         background: #e67e22; // Orange
         grid-column: span 1;
-        
+
         .status-val {
           font-size: 1.5rem;
           font-weight: 900;
@@ -1568,7 +1637,7 @@
       &.card-summary {
         background: #1d4e89; // Blue
         grid-column: span 2;
-        
+
         p {
           margin: 0;
           display: -webkit-box;
@@ -1617,7 +1686,7 @@
         color: #64748b;
         border: 1px solid #e2e8f0;
         grid-column: span 1;
-        
+
         h4 {
           color: #64748b !important;
           border-bottom-color: #e2e8f0 !important;
@@ -1626,7 +1695,10 @@
         .meta-line {
           font-size: 0.85rem;
           margin-bottom: 4px;
-          strong { color: #1e293b; }
+
+          strong {
+            color: #1e293b;
+          }
         }
       }
     }

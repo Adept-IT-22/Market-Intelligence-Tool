@@ -14,9 +14,12 @@ import logging
 from datetime import datetime
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
-from docxtpl import DocxTemplate
+from docxtpl import DocxTemplate, RichText
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from docx.shared import Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL
 # from agent_manager import call_gemini_sync # Moved to methods to prevent import stall
 
 logger = logging.getLogger(__name__)
@@ -244,7 +247,13 @@ class ReportAutomationEngine:
             
             # Extract relevant user answers
             section_answers = {q['id']: answers.get(q['id']) for q in section['questions']}
-            section_index = config['sections'].index(section)
+            # Calculate logical index (Introduction should be 1)
+            # Find index in config['sections'] but skip metadata
+            logical_index = 0
+            for i, s in enumerate(config['sections']):
+                if s['id'] == 'metadata': continue
+                logical_index += 1
+                if s['id'] == section_id: break
 
             prompt = f"""
             You are the Adept Report Synthesizer.
@@ -260,14 +269,14 @@ class ReportAutomationEngine:
             Write the {section['title']} section for the {config['title']}.
             1. Use professional, active voice.
             2. Follow the tone and formatting logic found in the guidelines.
-            3. Use systematic sub-section numbering: {section_index}.1, {section_index}.2, etc. 
+            3. Use systematic sub-section numbering: {logical_index}.1, {logical_index}.2, etc. 
                EVERY major topic MUST be a numbered sub-heading, not a bullet point.
             4. Use Markdown Tables for structured data (CRITICAL). 
             
             --- CRITICAL FORMATTING RULES ---
-            - NO Markdown headers (#). Use the {section_index}.X numbering for headings.
+            - NO Markdown headers (#). Use the {logical_index}.X numbering for headings.
             - Bolding is allowed for the numbered sub-headings.
-            - Do NOT include the main section title anywhere in your response.
+            - Do NOT include the main section title ({section['title']}) anywhere in your response.
             - Output 'N/A' for missing data.
             - Use double newlines between sub-sections.
             - Ensure Markdown tables are valid (correct number of pipes and dashes).
@@ -289,7 +298,7 @@ class ReportAutomationEngine:
         from concurrent.futures import ThreadPoolExecutor
         sections_to_process = config['sections']
         
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             results = list(executor.map(process_section, sections_to_process))
 
         # Reconstruct metadata in the exact order defined in config
@@ -522,22 +531,54 @@ class ReportAutomationEngine:
 
         # 1. Transform list back to dictionary for template direct-lookups with numbering
         sections_dict = {}
-        for i, s in enumerate(section_list):
+        logical_index = 0
+        for s in section_list:
             s_copy = s.copy()
-            # Prefix title with number (Start from 2 since Introduction/Header is 1)
-            s_copy['title'] = f"{i + 2}. {s['title']}"
+            if s['id'] == 'metadata':
+                # Metadata is not numbered in the body
+                sections_dict[s['id']] = s_copy
+                continue
+                
+            logical_index += 1
+            s_copy['title'] = f"{logical_index}. {s['title']}"
             sections_dict[s['id']] = s_copy
         
         # 2. Extract cover page metadata (usually from 'metadata' section)
         metadata_sec = sections_dict.get('metadata', {})
         form_data = metadata_sec.get('formData', {})
         
-        # 3. Build the context matching word/document.xml tags
+        # 3. Build sub-documents for each section to handle complex Markdown (like tables)
+        doc = DocxTemplate(template_path)
+        
+        # Prepare context
         rich_context = {
             "currentDate": datetime.now().strftime("%d %B %Y").upper(),
             "title": report_title or config['title'],
-            "sections": sections_dict
+            "sections": {}
         }
+
+        for s_id, s in sections_dict.items():
+            if s_id == 'metadata':
+                rich_context['sections'][s_id] = s
+                continue
+                
+            # Create a sub-document for this section's content
+            subdoc = doc.new_subdoc()
+            content = s.get('userOverride') or s.get('aiDraft') or ''
+            
+            if not content.strip():
+                # Fallback to form data
+                form_data = s.get('formData', {})
+                sec_config = next((sc for sc in config['sections'] if sc['id'] == s_id), None)
+                content = self._formdata_to_markdown(form_data, sec_config)
+            
+            self._inject_markdown_to_subdoc(subdoc, content)
+            
+            # Map subdoc to the standard fields so the template picks it up automatically
+            s['aiDraft'] = subdoc
+            s['userOverride'] = subdoc
+            s['content_subdoc'] = subdoc
+            rich_context['sections'][s_id] = s
         
         # Sprinkle in flat metadata fields for easy access (e.g. {{ project_name }})
         rich_context.update(form_data)
@@ -555,21 +596,156 @@ class ReportAutomationEngine:
             else:
                 element.set(qn('w:val'), 'true')
 
-            # --- Footer Suppression for Cover Page ---
-            # Word documents are split into sections. Usually, the cover is in the first section.
+            # --- Footer Management ---
+            # User wants big branded footer ONLY on the cover page (first page).
             if doc.sections:
-                first_section = doc.sections[0]
-                first_section.different_first_page_header_footer = True
-                # Clear footer for the first page if it exists
-                first_section.footer.is_linked_to_previous = False
-                for p in first_section.footer.paragraphs:
-                    p.text = ""
+                for i, section in enumerate(doc.sections):
+                    if i == 0:
+                        # Keep cover page footer
+                        continue
+                    
+                    # Internal pages: Break link and clear all possible footer types
+                    section.footer.is_linked_to_previous = False
+                    
+                    # Access the actual footers (default, first page, even page)
+                    # python-docx has footer, first_page_footer, even_page_footer
+                    for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
+                        if footer:
+                            for p in footer.paragraphs:
+                                p.text = ""
+                                # Also remove any images/shapes in paragraphs
+                                p.clear()
 
             doc.save(output_path)
             return True
         except Exception as e:
             logger.error(f"Docx render error: {e}")
             raise e
+
+    def _inject_markdown_to_subdoc(self, subdoc, markdown_text):
+        """
+        Parses markdown text and injects it into a python-docx subdoc object.
+        Supports: Paragraphs, Bold, and Markdown Tables.
+        """
+        import re
+        lines = markdown_text.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # 1. Detect Markdown Table
+            if line.startswith('|') and i + 1 < len(lines) and '-' in lines[i+1]:
+                # Collect all table lines
+                table_lines = []
+                while i < len(lines) and lines[i].strip().startswith('|'):
+                    table_lines.append(lines[i].strip())
+                    i += 1
+                
+                # Parse and create Word Table
+                if len(table_lines) >= 2:
+                    self._add_docx_table(subdoc, table_lines)
+                continue
+            
+            # 2. Detect Bullet Points
+            if line.startswith(('-', '*', '•', '✅', '⏳')):
+                p = subdoc.add_paragraph(style='List Bullet')
+                p.paragraph_format.space_after = Pt(6)
+                # Clean prefix and stray markdown asterisks
+                clean_line = re.sub(r'^[\-\*\•\✅\⏳]\s*', '', line)
+                clean_line = clean_line.strip('*').strip()
+                self._add_formatted_text(p, clean_line)
+                i += 1
+                continue
+
+            # 3. Detect Section Sub-headings (e.g. 1.1 Overview or 1.1 **Overview**)
+            # Matches: "1.1 Text", "1.1 **Text**", "*1.1 Text*", etc.
+            heading_match = re.match(r'^[\*\•\s]*(\d+\.\d+)\s*(.*)', line)
+            if heading_match:
+                base_num = heading_match.group(1)
+                text_part = heading_match.group(2).strip('*').strip()
+                
+                p = subdoc.add_paragraph()
+                p.paragraph_format.space_before = Pt(14)
+                p.paragraph_format.space_after = Pt(8)
+                
+                # Add the number part
+                run_num = p.add_run(f"{base_num} ")
+                run_num.bold = True
+                run_num.font.name = 'Outfit'
+                run_num.font.size = Pt(11)
+                
+                # Add the text part
+                run_text = p.add_run(text_part)
+                run_text.bold = True
+                run_text.font.name = 'Outfit'
+                run_text.font.size = Pt(11)
+                i += 1
+                continue
+
+            # 4. Standard Paragraph
+            if line:
+                p = subdoc.add_paragraph()
+                p.paragraph_format.line_spacing = 1.2
+                p.paragraph_format.space_after = Pt(10)
+                self._add_formatted_text(p, line)
+            
+            i += 1
+
+    def _add_formatted_text(self, paragraph, text):
+        """Handles bolding inside a paragraph run."""
+        import re
+        # Find **text**
+        parts = re.split(r'(\*\*.*?\*\*)', text)
+        for part in parts:
+            if part.startswith('**') and part.endswith('**'):
+                run = paragraph.add_run(part[2:-2])
+                run.bold = True
+            else:
+                paragraph.add_run(part)
+
+    def _add_docx_table(self, subdoc, table_lines):
+        """Converts MD table lines to a real Word table."""
+        # Parse headers and rows
+        rows_data = []
+        for line in table_lines:
+            if '---' in line: continue # Skip separator
+            # Split and remove the empty strings created by leading/trailing pipes
+            cells = [c.strip() for c in line.split('|')]
+            if cells and not cells[0]: cells.pop(0)
+            if cells and not cells[-1]: cells.pop()
+            
+            if cells:
+                rows_data.append(cells)
+        
+        if not rows_data: return
+
+        table = subdoc.add_table(rows=len(rows_data), cols=len(rows_data[0]))
+        table.style = 'Table Grid'
+        table.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # Add spacing before table
+        before_p = subdoc.add_paragraph()
+        before_p.paragraph_format.space_after = Pt(0)
+        
+        for r_idx, row_data in enumerate(rows_data):
+            row = table.rows[r_idx]
+            # Height for rows
+            row.height = Pt(24)
+            for c_idx, cell_val in enumerate(row_data):
+                if c_idx < len(row.cells):
+                    cell = row.cells[c_idx]
+                    # Clean markdown from cell value
+                    cell.text = cell_val.strip('*').strip()
+                    # Center text vertically
+                    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                    # Header styling
+                    if r_idx == 0:
+                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        for run in cell.paragraphs[0].runs:
+                            run.bold = True
+
+        # Add spacing after table
+        subdoc.add_paragraph()
 
     def _formdata_to_markdown(self, form_data, section_config=None):
         """

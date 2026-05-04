@@ -333,7 +333,7 @@
                     <span>Adept AI is thinking...</span>
                   </div>
 
-                  <div *ngIf="!section.aiDraft && !section.userOverride && !section.isThinking" class="placeholder"
+                  <div *ngIf="!section.aiDraft && !section.userOverride && !section.isThinking && (section.id !== 'status' || !section.formData['summary_text'])" class="placeholder"
                     (click)="setActiveSection(i)">
                     <ng-container *ngIf="getRoughNotes(section) as notes; else emptyInstruction">
                       <div class="live-notes-preview">
