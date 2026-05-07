@@ -626,4 +626,11 @@ export class ReportStudioComponent implements OnInit {
       }, 500);
     }
   }
+
+  hasAnalysis(s: ReportState | null): boolean {
+    if (!s || !s.analysis) return false;
+    return (s.analysis.risks?.length > 0 ||
+      s.analysis.inconsistencies?.length > 0 ||
+      s.analysis.suggestions?.length > 0);
+  }
 }

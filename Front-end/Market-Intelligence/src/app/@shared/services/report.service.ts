@@ -140,7 +140,7 @@ export class ReportService {
             return s;
           });
           this.stateSubject.next({ ...latestState, sections: updatedSections, isGenerating: false });
-          this.analyzeReport(); // Trigger analysis automatically
+          this.analyzeReport(); // Trigger analysis ONLY after generation
         }
       }),
       finalize(() => {
@@ -185,6 +185,7 @@ export class ReportService {
             return s;
           });
           this.stateSubject.next({ ...latestState, sections: finalSections });
+          this.analyzeReport();  // Trigger analysis after refinement
         }
       }),
       finalize(() => {
@@ -245,7 +246,6 @@ export class ReportService {
         return s;
       });
       this.stateSubject.next({ ...state, sections: updatedSections });
-      this.analyzeReport(); // Trigger advisor update
     }
   }
 
@@ -265,7 +265,6 @@ export class ReportService {
         return s;
       });
       this.stateSubject.next({ ...state, sections: updatedSections });
-      this.analyzeReport(); // Trigger advisor update
     }
   }
 

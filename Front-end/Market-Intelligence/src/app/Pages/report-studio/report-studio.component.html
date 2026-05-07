@@ -122,13 +122,23 @@
               </div>
             </div>
 
-            <div class="section-footer">
-              <button mat-button (click)="nextSection()" *ngIf="activeSectionIndex() < s.sections.length - 1">
-                Next Section <mat-icon>arrow_forward</mat-icon>
-              </button>
-            </div>
+            <!-- Footer moved to sidebar-footer -->
           </div>
         </div>
+
+        <!-- 3.5 FIXED SIDEBAR FOOTER -->
+        <div class="sidebar-footer glass" *ngIf="s.sections[activeSectionIndex()] as section">
+          <div class="footer-hint" *ngIf="activeSectionIndex() < s.sections.length - 1">
+            Progress: {{ activeSectionIndex() + 1 }} / {{ s.sections.length }}
+          </div>
+          <button mat-button (click)="nextSection()" *ngIf="activeSectionIndex() < s.sections.length - 1">
+            Next Section <mat-icon>arrow_forward</mat-icon>
+          </button>
+          <button mat-flat-button color="primary" (click)="openPreview()" *ngIf="activeSectionIndex() === s.sections.length - 1">
+            Finish & Preview <mat-icon>check_circle</mat-icon>
+          </button>
+        </div>
+
       </aside>
 
       <!-- 3. RIGHT PANE: Synthesis & Preview -->
@@ -417,54 +427,69 @@
           </div>
         </div>
 
-        <!-- 4. ADVISOR OVERLAY (Auto-Insights) -->
-        <div class="advisor-shelf glass" *ngIf="s.analysis" [style.height.px]="advisorHeight()" style="flex: none;">
-          <div class="resizer-handle" (mousedown)="startResizing($event)">
-            <div class="grabber"></div>
-          </div>
-          <div class="insight-header">
-            <div class="title-group">
-              <mat-icon>psychology</mat-icon>
-              <span>Adept Strategic Advisor</span>
-            </div>
-            <span class="auto-badge">AI Analysis</span>
-          </div>
-          <div class="insight-grid">
-            <div class="insight-col" *ngIf="s.analysis.inconsistencies.length">
-              <span class="label error">Inconsistencies</span>
-              <ul class="insight-list">
-                <li *ngFor="let item of s.analysis.inconsistencies" class="insight-item clickable"
-                  (click)="jumpToFix(item.target_id)">
-                  <mat-icon>error_outline</mat-icon>
-                  <span>{{ item.text }}</span>
-                </li>
-              </ul>
-            </div>
-            <div class="insight-col" *ngIf="s.analysis.risks.length">
-              <span class="label warning">Risks Detected</span>
-              <ul class="insight-list">
-                <li *ngFor="let item of s.analysis.risks" class="insight-item clickable"
-                  (click)="jumpToFix(item.target_id)">
-                  <mat-icon>warning_amber</mat-icon>
-                  <span>{{ item.text }}</span>
-                </li>
-              </ul>
-            </div>
-            <div class="insight-col" *ngIf="s.analysis.suggestions.length">
-              <span class="label info">Suggestions</span>
-              <ul class="insight-list">
-                <li *ngFor="let item of s.analysis.suggestions" class="insight-item clickable"
-                  (click)="jumpToFix(item.target_id)">
-                  <mat-icon>lightbulb_outline</mat-icon>
-                  <span>{{ item.text }}</span>
-                </li>
-              </ul>
-            </div>
+      </main>
+    </div> <!-- Closed studio-main -->
+
+    <!-- 4. ADVISOR SHELF (Bottom Docked - Restored) -->
+    <div class="advisor-shelf glass" [style.height.px]="advisorHeight()" *ngIf="!s.isGenerating && hasAnalysis(s)">
+      <div class="resizer-handle" (mousedown)="startResizing($event)">
+        <div class="grabber"></div>
+      </div>
+      <div class="insight-header">
+        <div class="title-group">
+          <mat-icon>psychology</mat-icon>
+          <span>Adept Strategic Advisor</span>
+        </div>
+        <span class="auto-badge">AI Strategic Insight</span>
+      </div>
+
+      <div class="insight-grid" *ngIf="hasAnalysis(s); else waitingState">
+        <div class="insight-col" *ngIf="s.analysis?.inconsistencies?.length">
+          <span class="label error">Inconsistencies</span>
+          <div class="col-scroll">
+            <ul class="insight-list">
+              <li *ngFor="let item of s.analysis?.inconsistencies" class="insight-item clickable"
+                (click)="jumpToFix(item.target_id)">
+                <mat-icon>error_outline</mat-icon>
+                <span>{{ item.text }}</span>
+              </li>
+            </ul>
           </div>
         </div>
-      </main>
+        <div class="insight-col" *ngIf="s.analysis?.risks?.length">
+          <span class="label warning">Risks Detected</span>
+          <div class="col-scroll">
+            <ul class="insight-list">
+              <li *ngFor="let item of s.analysis?.risks" class="insight-item clickable"
+                (click)="jumpToFix(item.target_id)">
+                <mat-icon>warning_amber</mat-icon>
+                <span>{{ item.text }}</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+        <div class="insight-col" *ngIf="s.analysis?.suggestions?.length">
+          <span class="label info">Strategic Suggestions</span>
+          <div class="col-scroll">
+            <ul class="insight-list">
+              <li *ngFor="let item of s.analysis?.suggestions" class="insight-item clickable"
+                (click)="jumpToFix(item.target_id)">
+                <mat-icon>lightbulb_outline</mat-icon>
+                <span>{{ item.text }}</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <ng-template #waitingState>
+        <div class="advisor-placeholder">
+           <mat-icon class="pulse">psychology</mat-icon>
+           <span>Adept Strategic Advisor is monitoring your draft...</span>
+        </div>
+      </ng-template>
     </div>
-  </div>
+
 
   <!-- Loading State -->
   <div class="loading-full" *ngIf="!state() && !initError()">
@@ -728,4 +753,5 @@
       </ng-container>
     </div>
   </div>
+</div>
 </app-base-layout>
