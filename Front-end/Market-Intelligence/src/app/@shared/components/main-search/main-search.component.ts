@@ -488,12 +488,19 @@ export class MainSearchComponent implements AfterViewChecked {
 
     const isLocalPath = (path: string): boolean => {
       return path.includes('\\') || path.startsWith('C:') || path.startsWith('D:') ||
-             path.includes('/Users/') || path.includes('\\Users\\');
+             path.includes('/Users/') || path.includes('\\Users\\') ||
+             path.includes('/uploads/') || path.includes('/app/uploads/');
     };
 
     const toSharePointUrl = (localPath: string): string => {
       let normalizedPath = localPath.replace(/\\/g, '/');
       
+      // Handle uploaded files by pointing them to the backend file server
+      if (normalizedPath.includes('/uploads/')) {
+        const filename = extractFilename(normalizedPath);
+        return `${environment.apiUrl}/uploads/${filename}`;
+      }
+
       // Remove the base local path to get a relative path within the company drive
       const relativeToDrive = normalizedPath
         .replace(localUserBase.replace(/\\/g, '/'), '')

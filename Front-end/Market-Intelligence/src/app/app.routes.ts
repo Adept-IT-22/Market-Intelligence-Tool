@@ -14,5 +14,12 @@ export const routes: Routes = [
       import('./Pages/report-studio/report-studio.component').then(
         (m) => m.ReportStudioComponent
       ),
+    },
+    {
+    path: 'admin',
+    loadComponent: () =>
+      import('./Pages/admin-dashboard/admin-dashboard.component').then(
+        (m) => m.AdminDashboardComponent
+      ),
     }
 ];

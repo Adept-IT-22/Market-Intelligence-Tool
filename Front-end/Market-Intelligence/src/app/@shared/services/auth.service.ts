@@ -8,6 +8,7 @@ export interface User {
   id: number;
   email: string;
   displayName?: string;
+  role?: 'admin' | 'analyst' | 'viewer';
 }
 
 interface AuthResponse {
@@ -24,6 +25,7 @@ export class AuthService {
   // Use signals for reactive state
   currentUser = signal<User | null>(null);
   isAuthenticated = signal<boolean>(false);
+  isAdmin = signal<boolean>(false);
 
   constructor(
     private http: HttpClient,
@@ -72,6 +74,7 @@ export class AuthService {
     }
     this.currentUser.set(null);
     this.isAuthenticated.set(false);
+    this.isAdmin.set(false);
   }
 
   getMe() {
@@ -80,6 +83,7 @@ export class AuthService {
       tap(res => {
         this.currentUser.set(res.user);
         this.isAuthenticated.set(true);
+        this.isAdmin.set(res.user.role === 'admin');
       }),
       catchError(err => {
         this.logout();
@@ -110,5 +114,6 @@ export class AuthService {
     }
     this.currentUser.set(res.user);
     this.isAuthenticated.set(true);
+    this.isAdmin.set(res.user.role === 'admin');
   }
 }

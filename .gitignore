@@ -248,3 +248,8 @@ Backend/service-account.json
 *.pem
 *.key
 
+# Local ONNX Models
+Backend/model_onnx/
+Backend/model_onnx_quantized/
+
+

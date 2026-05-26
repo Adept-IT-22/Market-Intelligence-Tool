@@ -19,6 +19,7 @@ from typing import Optional, Any, Generator, AsyncGenerator, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 import queue
 import threading
+from datetime import datetime
 import base64
 
 load_dotenv()
@@ -846,7 +847,17 @@ class AgentManager:
                     source_link = payload.get('source', 'Unknown')
                     source_name = self._get_display_name(source_link)
                     
-                    point_text = f"\n---\nSource: {source_name} (URI: {source_link})\nContent:\n{text_content}\n"
+                    ingested_at = payload.get('ingested_at')
+                    date_info = ""
+                    if ingested_at:
+                        try:
+                            # 2026-05-26T11:53:58.174708 -> May 26, 2026
+                            dt = datetime.fromisoformat(ingested_at)
+                            date_info = f" | Ingested At: {dt.strftime('%B %d, %Y')}"
+                        except Exception:
+                            date_info = f" | Ingested At: {ingested_at}"
+                            
+                    point_text = f"\n---\nSource: {source_name} (URI: {source_link}){date_info}\nContent:\n{text_content}\n"
                     if len(context) + len(point_text) > max_chars:
                         context += point_text[:max_chars - len(context)] + "...[Truncated]"
                         break
@@ -944,7 +955,17 @@ class AgentManager:
              text = payload.get('text', str(payload))
              source_link = payload.get('source', 'Unknown')
              source_name = self._get_display_name(source_link)
-             semantic_context += f"- Document: {source_name} (URI: {source_link})\n  Content: {text}\n\n"
+             
+             ingested_at = payload.get('ingested_at')
+             date_info = ""
+             if ingested_at:
+                 try:
+                     dt = datetime.fromisoformat(ingested_at)
+                     date_info = f" | Ingested At: {dt.strftime('%B %d, %Y')}"
+                 except Exception:
+                     date_info = f" | Ingested At: {ingested_at}"
+                     
+             semantic_context += f"- Document: {source_name} (URI: {source_link}){date_info}\n  Content: {text}\n\n"
 
         logger.info(f"Context sizes: Hierarchical={len(detail_context)} chars, Semantic={len(semantic_context)} chars")
 
@@ -994,7 +1015,17 @@ class AgentManager:
              text = payload.get('text', str(payload))
              source_link = payload.get('source', 'Unknown')
              source_name = self._get_display_name(source_link)
-             semantic_context += f"- Document: {source_name} (URI: {source_link})\n  Content: {text}\n\n"
+             
+             ingested_at = payload.get('ingested_at')
+             date_info = ""
+             if ingested_at:
+                 try:
+                     dt = datetime.fromisoformat(ingested_at)
+                     date_info = f" | Ingested At: {dt.strftime('%B %d, %Y')}"
+                 except Exception:
+                     date_info = f" | Ingested At: {ingested_at}"
+                     
+             semantic_context += f"- Document: {source_name} (URI: {source_link}){date_info}\n  Content: {text}\n\n"
 
         yield from self.get_final_response_stream(
             semantic_results, 
@@ -1044,8 +1075,10 @@ class AgentManager:
         
         # Prepare Unified Prompt
         system_prompt = _build_system_prompt(self.chat_history)
+        current_date_str = datetime.now().strftime('%B %d, %Y')
         
         user_prompt = f"""
+Current Date: {current_date_str}
 User Query: "{self.query}"
 
 === SEARCH CONTEXT ===
@@ -1095,7 +1128,9 @@ Provide a detailed, structured response with:
              yield from call_gemini_stream_sync(prompt)
              return
 
+        current_date_str = datetime.now().strftime('%B %d, %Y')
         user_prompt = f"""
+Current Date: {current_date_str}
 User Query: "{self.query}"
 
 === SEARCH CONTEXT ===

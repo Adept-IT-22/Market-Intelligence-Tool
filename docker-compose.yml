@@ -24,6 +24,10 @@ services:
       - QDRANT_PORT=6333
       - DATABASE_PATH=/app/DB/market-intelligence.db
       - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -43,6 +47,38 @@ services:
       - "8000:8000"
     depends_on:
       - qdrant_official
+      - postgres
+      - redis
+    networks:
+      - app-network
+    restart: always
+
+  # --- Background Ingestion Worker ---
+  worker:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    command: python scratch/run_simple_worker.py
+    environment:
+      - QDRANT_HOST=qdrant_official
+      - QDRANT_PORT=6333
+      - DATABASE_PATH=/app/DB/market-intelligence.db
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    dns:
+      - 8.8.8.8
+    volumes:
+      - ./DB:/app/DB
+      - ./Backend/uploads:/app/uploads
+      - ./Backend/.env:/app/.env
+      - ./Backend/service-account.json:/app/service-account.json
+    depends_on:
+      - redis
+      - postgres
+      - qdrant_official
     networks:
       - app-network
     restart: always
@@ -58,11 +94,36 @@ services:
       - app-network
     restart: always
 
+  # --- Relational Metadata Database (PostgreSQL) ---
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=market_intelligence
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres_local_secure
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    restart: always
+
+  # --- Cache & Task Queue (Redis) ---
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+    restart: always
+
 networks:
   app-network:
     driver: bridge
 
 volumes:
   qdrant_storage:
+  postgres_data:
 
 

@@ -25,9 +25,26 @@ def init_chat_tables():
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             display_name TEXT,
+            role TEXT DEFAULT 'analyst' CHECK(role IN ('admin', 'analyst', 'viewer')),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # Migration: Add role column if it doesn't exist (for existing DBs)
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'analyst' CHECK(role IN ('admin', 'analyst', 'viewer'))")
+        conn.commit()
+        print("Migration: Added 'role' column to users table.")
+    except Exception:
+        pass  # Column already exists
+    
+    # Auto-promote first user to admin
+    cursor.execute('SELECT id FROM users ORDER BY id ASC LIMIT 1')
+    first_user = cursor.fetchone()
+    if first_user:
+        cursor.execute('UPDATE users SET role = ? WHERE id = ? AND (role IS NULL OR role != ?)', ('admin', first_user['id'], 'admin'))
+        if cursor.rowcount > 0:
+            print(f"Auto-promoted user {first_user['id']} to admin.")
     
     # Chat sessions table
     cursor.execute('''
@@ -89,7 +106,7 @@ def get_user_by_id(user_id: int) -> dict:
     """Get user by ID (including password_hash for auth operations)."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, email, display_name, password_hash, created_at FROM users WHERE id = ?', (user_id,))
+    cursor.execute('SELECT id, email, display_name, password_hash, role, created_at FROM users WHERE id = ?', (user_id,))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -210,6 +227,50 @@ def get_chat_messages(session_id: int) -> list:
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+# Admin: User Management CRUD
+def get_all_users() -> list:
+    """Get all users (for admin dashboard)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, email, display_name, role, created_at FROM users ORDER BY created_at ASC')
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+def update_user_role(user_id: int, role: str) -> bool:
+    """Update a user's role (admin only)."""
+    if role not in ('admin', 'analyst', 'viewer'):
+        return False
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE users SET role = ? WHERE id = ?', (role, user_id))
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+def delete_user(user_id: int) -> bool:
+    """Delete a user (admin only). Cascades to their sessions/messages."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # Delete messages first (FK cascade may not be enabled in SQLite by default)
+    cursor.execute('DELETE FROM chat_messages WHERE session_id IN (SELECT id FROM chat_sessions WHERE user_id = ?)', (user_id,))
+    cursor.execute('DELETE FROM chat_sessions WHERE user_id = ?', (user_id,))
+    cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+def get_user_count() -> int:
+    """Get total user count."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) as count FROM users')
+    row = cursor.fetchone()
+    conn.close()
+    return row['count'] if row else 0
 
 if __name__ == "__main__":
     init_chat_tables()
