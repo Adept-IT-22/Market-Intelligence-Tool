@@ -1,4 +1,4 @@
-from flask import Flask, request, g, jsonify, Response
+from flask import Flask, request, g, jsonify, Response, send_from_directory
 import json
 from flask_cors import CORS
 import time
@@ -13,11 +13,13 @@ from models import (
     init_chat_tables, create_user, get_user_by_email, get_user_by_id,
     create_chat_session, get_user_chat_sessions, get_chat_session,
     update_chat_session_title, delete_chat_session,
-    add_chat_message, get_chat_messages, update_user_password
+    add_chat_message, get_chat_messages, update_user_password,
+    get_all_users, update_user_role, delete_user, get_user_count
 )
-from auth import hash_password, verify_password, create_token, jwt_required, jwt_optional
+from auth import hash_password, verify_password, create_token, jwt_required, jwt_optional, admin_required
 from cache_manager import get_cached_response, set_cached_response
 from report_engine import engine, REPORT_TYPES
+from engine_manager import EngineManager
 
 #Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -57,13 +59,19 @@ def signup():
     hashed_pw = hash_password(password)
     user_id = create_user(email, hashed_pw, display_name)
     
-    token = create_token(user_id, email)
+    # First user auto-gets admin (handled by init_chat_tables migration),
+    # but also check here for fresh signups
+    user = get_user_by_id(user_id)
+    role = user.get('role', 'analyst') if user else 'analyst'
+    
+    token = create_token(user_id, email, role)
     return jsonify({
         'token': token,
         'user': {
             'id': user_id,
             'email': email,
-            'displayName': display_name
+            'displayName': display_name,
+            'role': role
         }
     }), 201
 
@@ -80,18 +88,19 @@ def login():
     if not user or not verify_password(password, user['password_hash']):
         return jsonify({'error': 'Invalid email or password'}), 401
 
-    token = create_token(user['id'], user['email'])
+    token = create_token(user['id'], user['email'], user.get('role', 'analyst'))
     return jsonify({
         'token': token,
         'user': {
             'id': user['id'],
             'email': user['email'],
-            'displayName': user['display_name']
+            'displayName': user['display_name'],
+            'role': user.get('role', 'analyst')
         }
     }), 200
 
 @app.route('/auth/me', methods=['GET'])
-# @jwt_required
+@jwt_required
 def get_me():
     user = get_user_by_id(g.user_id)
     if not user:
@@ -99,7 +108,8 @@ def get_me():
     return jsonify({'user': {
         'id': user['id'],
         'email': user['email'],
-        'displayName': user['display_name']
+        'displayName': user['display_name'],
+        'role': user.get('role', 'analyst')
     }}), 200
 
 @app.route('/auth/change-password', methods=['POST'])
@@ -292,6 +302,12 @@ MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+@app.route('/uploads/<path:filename>', methods=['GET'])
+@jwt_required
+def serve_upload(filename):
+    """Serve uploaded files directly so they are downloadable from references."""
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     """
@@ -378,6 +394,7 @@ def upload_file():
     
     # Decode information
     department = "General"
+    source_url = None
     if 'data' in locals() and isinstance(data, dict):
         # Extract department from JSON with multiple aliases (Fix 2 & Fix 3)
         department = (
@@ -388,6 +405,7 @@ def upload_file():
             data.get('category') or
             "General"
         )
+        source_url = data.get('source_url') or data.get('link') or data.get('url')
     elif request.args.get('source'):
         # Extract from Query Param (if used)
         department = request.args.get('source')
@@ -404,42 +422,34 @@ def upload_file():
             f.write(content)
         logger.info(f"File uploaded: {unique_filename} ({file_size / 1024:.1f} KB) -> Dept: {department}")
         
-        # --- Trigger Automatic Ingestion in Background ---
-        def run_ingestion_task(task_file_path, task_f_type, task_filename, task_department):
-            try:
-                from ingest_data import DataIngester
-                logger.info(f"Background Ingestion Started: {task_filename} for {task_department}")
-                ingester = DataIngester()
-                ingester.process_input(
-                    input_path=task_file_path,
-                    source_type=task_f_type,
-                    title=task_filename,
-                    sectors="General",
-                    summary="Automated Upload via API/SharePoint",
-                    department=task_department
-                )
-                logger.info(f"Background Ingestion Successful: {task_filename}")
-            except Exception as ingest_err:
-                logger.error(f"Background Ingestion Failed for {task_filename}: {ingest_err}")
-
+        # --- Trigger Elite Engine Ingestion via Redis ---
+        from engine_manager import EngineManager
+        engine_mgr = EngineManager()
+        
         # Determine type
         ext = clean_filename.rsplit('.', 1)[1].lower() if '.' in clean_filename else 'pdf'
         type_map = {
             'xlsx': 'excel', 'xls': 'excel', 
             'pdf': 'pdf', 'docx': 'docx', 'pptx': 'pptx',
-            'txt': 'pdf', 'csv': 'excel', 'md': 'pdf',
+            'txt': 'md', 'csv': 'excel', 'md': 'md',
             'png': 'image', 'jpg': 'image', 'jpeg': 'image', 'webp': 'image'
         }
         f_type = type_map.get(ext, 'pdf')
 
-        import threading
-        thread = threading.Thread(target=run_ingestion_task, args=(file_path, f_type, filename, department))
-        thread.start()
-        logger.info(f"Auto-ingestion queued for {unique_filename}")
+        task_id = engine_mgr.dispatch_task(
+            file_path=file_path,
+            source_type=f_type,
+            department=department,
+            source_url=source_url,
+            original_filename=filename
+        )
+        
+        logger.info(f"Elite Engine: Task {task_id} dispatched for {unique_filename} (source_url: {source_url})")
 
         duration = time.perf_counter() - start_time
         return {
             "success": True,
+            "task_id": task_id,
             "filename": unique_filename,
             "original_filename": filename,
             "size_kb": round(file_size / 1024, 1),
@@ -448,6 +458,162 @@ def upload_file():
     except Exception as e:
         logger.error(f"Failed to save uploaded file: {e}")
         return {"error": "Failed to save file"}, 500
+
+@app.route('/ingest/status/<task_id>', methods=['GET'])
+@jwt_required
+def get_ingest_status(task_id):
+    """Return the status of an ingestion task."""
+    from engine_manager import EngineManager
+    engine_mgr = EngineManager()
+    status = engine_mgr.get_task_status(task_id)
+    return jsonify(status), 200
+
+@app.route('/ingest/failed', methods=['GET'])
+@jwt_required
+@admin_required
+def get_failed_tasks():
+    """Return all failed tasks (Dead Letter Queue)."""
+    from engine_manager import EngineManager
+    from rq.job import Job
+    engine_mgr = EngineManager()
+    
+    # Accessing the failed job registry
+    failed_job_ids = engine_mgr.failed_registry.get_job_ids()
+    jobs = Job.fetch_many(failed_job_ids[:50], connection=engine_mgr.redis)
+    # Filter out None values just in case a job was deleted
+    valid_jobs = [j for j in jobs if j is not None]
+    
+    return jsonify({
+        "count": engine_mgr.failed_registry.count,
+        "tasks": [{"id": j.id, "created_at": j.created_at} for j in valid_jobs]
+    }), 200
+
+@app.route('/health', methods=['GET'])
+def system_health():
+    """Return detailed system health status."""
+    from monitoring import MonitoringSystem
+    mon = MonitoringSystem()
+    return jsonify(mon.get_system_health()), 200
+
+@app.route('/admin/ingestion-history', methods=['GET'])
+@admin_required
+def admin_ingestion_history():
+    """Retrieve all ingestion history from PostgreSQL ingestion_history table."""
+    limit = request.args.get('limit', default=50, type=int)
+    offset = request.args.get('offset', default=0, type=int)
+    status = request.args.get('status', default=None, type=str)
+    search = request.args.get('search', default=None, type=str)
+    
+    try:
+        import psycopg2
+        import psycopg2.extras
+        from db_migration import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Build query dynamically
+        query_base = "SELECT * FROM ingestion_history"
+        count_base = "SELECT COUNT(*) as count FROM ingestion_history"
+        where_clauses = []
+        params = []
+        
+        if status and status.lower() != 'all':
+            where_clauses.append("status = %s")
+            params.append(status.lower())
+            
+        if search:
+            where_clauses.append("(filename ILIKE %s OR original_filename ILIKE %s OR department ILIKE %s)")
+            search_param = f"%{search}%"
+            params.extend([search_param, search_param, search_param])
+            
+        if where_clauses:
+            where_str = " WHERE " + " AND ".join(where_clauses)
+            query_base += where_str
+            count_base += where_str
+            
+        # Add order by
+        query_base += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        
+        # We need copy of params for query_base, because params has limit and offset appended
+        query_params = list(params)
+        query_params.extend([limit, offset])
+        
+        # Execute count query
+        cur.execute(count_base, params)
+        total_count = cur.fetchone()['count']
+        
+        # Execute history query
+        cur.execute(query_base, query_params)
+        rows = cur.fetchall()
+        
+        # Convert datetime objects to string
+        history = []
+        for r in rows:
+            row_dict = dict(r)
+            for k, v in row_dict.items():
+                if hasattr(v, 'isoformat'):
+                    row_dict[k] = v.isoformat()
+            history.append(row_dict)
+            
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            "count": total_count,
+            "history": history
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch ingestion history: {e}")
+        return jsonify({"error": f"Failed to fetch ingestion history: {str(e)}"}), 500
+
+@app.route('/admin/stats', methods=['GET'])
+@admin_required
+def admin_stats():
+    """Return combined system health, queue, and storage stats."""
+    from monitoring import MonitoringSystem
+    mon = MonitoringSystem()
+    stats = mon.get_admin_stats()
+    stats['user_count'] = get_user_count()
+    return jsonify(stats), 200
+
+@app.route('/admin/users', methods=['GET'])
+@admin_required
+def admin_list_users():
+    """List all users with roles."""
+    users = get_all_users()
+    return jsonify({'users': users, 'total': len(users)}), 200
+
+@app.route('/admin/users/<int:user_id>/role', methods=['PUT'])
+@admin_required
+def admin_update_role(user_id):
+    """Update a user's role."""
+    data = request.json
+    new_role = data.get('role')
+    if not new_role:
+        return jsonify({'error': 'Role is required'}), 400
+    
+    # Prevent self-demotion
+    if user_id == g.user_id:
+        return jsonify({'error': 'Cannot change your own role'}), 400
+    
+    success = update_user_role(user_id, new_role)
+    if not success:
+        return jsonify({'error': 'Failed to update role or invalid role'}), 400
+    return jsonify({'success': True}), 200
+
+@app.route('/admin/users/<int:user_id>', methods=['DELETE'])
+@admin_required
+def admin_delete_user(user_id):
+    """Delete a user."""
+    # Prevent self-deletion
+    if user_id == g.user_id:
+        return jsonify({'error': 'Cannot delete yourself'}), 400
+    
+    success = delete_user(user_id)
+    if not success:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify({'success': True}), 200
 
 @app.route('/upload/limits', methods=['GET'])
 def get_upload_limits():

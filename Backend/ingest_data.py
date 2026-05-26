@@ -5,7 +5,8 @@ import uuid
 import re
 import argparse
 import requests
-import sqlite3
+import psycopg2
+from psycopg2 import sql, extras
 import base64
 from datetime import datetime
 from bs4 import BeautifulSoup
@@ -17,6 +18,7 @@ from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
 from groq import Groq # Keep for legacy/future
+from typing import Optional, Dict, Any
 # Vision / OCR Imports (Optional)
 try:
     import google.generativeai as genai
@@ -48,10 +50,23 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 class DataIngester:
-    def __init__(self):
-        self.conn = sqlite3.connect(DB_PATH)
-        self.cursor = self.conn.cursor()
+    def __init__(self, task_metadata: Optional[Dict[str, Any]] = None):
+        # Postgres Connection
+        self.conn = psycopg2.connect(
+            host=os.getenv("POSTGRES_HOST", "localhost"),
+            port=os.getenv("POSTGRES_PORT", "5432"),
+            database=os.getenv("POSTGRES_DB", "market_intelligence"),
+            user=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.environ["POSTGRES_PASSWORD"]
+        )
+        self.cursor = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        self.task_metadata = task_metadata or {}
         self.summary_report = {"success": [], "failed": [], "skipped": []}
+        
+        # Elite Engine Components
+        from engine_manager import DataTransformer, AIEnricher
+        self.transformer = DataTransformer()
+        self.enricher = AIEnricher(GOOGLE_API_KEY, GROQ_API_KEY)
         
         # Initialize Embedder
         logger.info("Loading embedding model...")
@@ -88,6 +103,8 @@ class DataIngester:
             raise
 
     def __del__(self):
+        if hasattr(self, 'cursor') and self.cursor:
+            self.cursor.close()
         if hasattr(self, 'conn') and self.conn:
             self.conn.close()
 
@@ -173,8 +190,9 @@ class DataIngester:
         if len(text) > 500: score += 0.1
         return min(1.0, score)
 
-    def process_input(self, input_path: str, source_type: str, title: str, sectors: str, summary: str, department: str = "General"):
-        logger.info(f"Processing {source_type}: {input_path} for department: {department}")
+    def process_input(self, input_path: str, source_type: str, title: str, sectors: str, summary: str, department: str = "General", source_url: Optional[str] = None):
+        logger.info(f"Processing {source_type}: {input_path} for department: {department} (source_url: {source_url})")
+        self.current_source_url = source_url
         
         # Normalize input path
         if not input_path.startswith(('http://', 'https://')):
@@ -227,11 +245,13 @@ class DataIngester:
                 logger.warning(f"Rolling back: Dropping routing table {routing_table_name}")
                 try:
                     self.cursor.execute(f"DROP TABLE IF EXISTS {routing_table_name}")
-                    self.cursor.execute("DELETE FROM Master WHERE id = ?", (master_id,))
+                    self.cursor.execute("DELETE FROM master WHERE id = %s", (master_id,))
                     self.conn.commit()
                 except Exception as rollback_err:
                     logger.error(f"Rollback failed: {rollback_err}")
             raise e
+        finally:
+            self.current_source_url = None
 
     def _create_master_entry(self, title, source, source_type, summary, sectors, department):
         # Create unique routing table name prefix
@@ -239,23 +259,30 @@ class DataIngester:
         month_str = datetime.now().strftime("%B %Y")
         
         logger.info(f"Creating Master Entry: {title} (Dept: {department})")
-        self.cursor.execute("""
-            INSERT INTO Master (Title, Source, Summary, Datatype, Sectors, table_name, month_created, Department)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (title, source, summary, source_type, sectors, "PENDING", month_str, department))
         
-        master_id = self.cursor.lastrowid
+        task_id = self.task_metadata.get('task_id')
+        worker_id = self.task_metadata.get('worker_id')
+        
+        db_source = self.current_source_url if getattr(self, 'current_source_url', None) else source
+        
+        self.cursor.execute("""
+            INSERT INTO master (title, source, summary, datatype, sectors, table_name, month_created, department, task_id, worker_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (title, db_source, summary, source_type, sectors, "PENDING", month_str, department, task_id, worker_id))
+        
+        master_id = self.cursor.fetchone()['id']
         routing_table_name = f"route_{safe_title[:20]}_{master_id}"
         self._validate_table_name(routing_table_name)
         
         # Update with real routing table name
-        self.cursor.execute("UPDATE Master SET table_name = ? WHERE id = ?", (routing_table_name, master_id))
+        self.cursor.execute("UPDATE master SET table_name = %s WHERE id = %s", (routing_table_name, master_id))
         
         self._create_routing_table(routing_table_name)
         self.conn.commit()
         
         # --- v2: Auto-index into PageIndex ---
-        self._index_to_page_index(master_id, title, summary, source, sectors, department, source_type, routing_table_name)
+        self._index_to_page_index(master_id, title, summary, db_source, sectors, department, source_type, routing_table_name)
         
         return master_id, routing_table_name
 
@@ -301,19 +328,22 @@ class DataIngester:
         logger.info(f"Creating Routing Table: {table_name}")
         self.cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 master_id TEXT,
-                Title TEXT,
-                Datatype TEXT,
-                Sectors TEXT,
-                Department TEXT,     -- NEW COLUMN
-                table_name TEXT,       -- For SQL Details
-                qdrant_source TEXT,    -- For Text Details
-                qdrant_point_id TEXT   -- For Text Details
+                title TEXT,
+                datatype TEXT,
+                sectors TEXT,
+                department TEXT,
+                table_name TEXT,
+                qdrant_source TEXT,
+                qdrant_point_id TEXT
             )
         """)
 
     def _process_excel(self, file_path, master_id, routing_table_name, sectors, department):
+        from sqlalchemy import create_engine
+        db_url = f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}/{os.getenv('POSTGRES_DB')}"
+        engine = create_engine(db_url)
         try:
             xls = pd.ExcelFile(file_path)
             for sheet_name in xls.sheet_names:
@@ -330,16 +360,20 @@ class DataIngester:
                 
                 detail_table_name = f"detail_{master_id}_{safe_sheet}"
                 self._validate_table_name(detail_table_name)
-                df.to_sql(detail_table_name, self.conn, if_exists='replace', index=False)
+                
+                # Use SQLAlchemy engine for to_sql (Postgres requires it)
+                df.to_sql(detail_table_name, engine, if_exists='replace', index=False)
                 
                 self.cursor.execute(f"""
-                    INSERT INTO {routing_table_name} (master_id, Title, Datatype, Sectors, Department, table_name)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO {routing_table_name} (master_id, title, datatype, sectors, department, table_name)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                 """, (master_id, f"Sheet: {sheet_name}", "SQL", sectors, department, detail_table_name))
             self.conn.commit()
         except Exception as e:
             logger.error(f"Excel processing failed for {file_path}: {e}")
             raise e
+        finally:
+            engine.dispose()
 
     def _process_pdf(self, file_path, master_id, routing_table_name, sectors, department):
         try:
@@ -493,6 +527,9 @@ class DataIngester:
 
     def _upsert_text_chunks(self, text, source, master_id, routing_table_name, sectors, department, title_prefix, doc_type="general", section_name=None):
         chunks = self._chunk_text(text, max_size=1000)  # Now uses semantic chunking
+        
+        qdrant_source = self.current_source_url if getattr(self, 'current_source_url', None) else source
+        
         for k, chunk in enumerate(chunks):
             embedding = self.embedder.encode(chunk).tolist()
             point_id = str(uuid.uuid4())
@@ -500,18 +537,30 @@ class DataIngester:
             # Metadata for both DBs
             ingested_at = datetime.now().isoformat()
             
+            # --- Elite Pipeline: Transform & Enrich ---
+            # 1. Transform
+            transformed_chunk = self.transformer.transform({"text": chunk}, "rag_pipeline")
+            chunk_to_store = transformed_chunk.get("text", chunk)
+            
+            # 2. Enrich (AI Metadata)
+            enrichment = self.enricher.enrich(chunk_to_store, context="rag_pipeline")
+            
             payload = {
                 "master_id": master_id,
                 "routing_table": routing_table_name,
-                "source": source,
-                "text": chunk,
+                "source": qdrant_source,
+                "text": chunk_to_store,
                 "sectors": sectors,
                 "department": department,
                 "section_name": section_name or title_prefix,
                 "doc_type": doc_type,
-                "keywords": self._extract_keywords(chunk),
-                "importance": self._score_importance(chunk),
-                "ingested_at": ingested_at
+                "keywords": self._extract_keywords(chunk_to_store),
+                "importance": self._score_importance(chunk_to_store),
+                "sentiment": enrichment.get("sentiment"),
+                "classification": enrichment.get("classification"),
+                "ingested_at": ingested_at,
+                "task_id": self.task_metadata.get("task_id"),
+                "worker_id": self.task_metadata.get("worker_id")
             }
             
             # 1. Upsert to Qdrant (Semantic + Metadata)
@@ -523,9 +572,9 @@ class DataIngester:
             # 2. Insert into SQL Routing Table
             table_name_safe = self._validate_table_name(routing_table_name)
             self.cursor.execute(f"""
-                INSERT INTO {table_name_safe} (master_id, Title, Datatype, Sectors, Department, qdrant_source, qdrant_point_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (master_id, f"{title_prefix} Part {k+1}", "Text/Hybrid", sectors, department, source, point_id))
+                INSERT INTO {table_name_safe} (master_id, title, datatype, sectors, department, qdrant_source, qdrant_point_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (master_id, f"{title_prefix} Part {k+1}", "Text/Hybrid", sectors, department, qdrant_source, point_id))
         
         self.conn.commit()
 

@@ -7,10 +7,17 @@ PyJWT==2.8.0
 bcrypt==4.1.3
 requests==2.32.3
 gunicorn==22.0.0
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.30
+redis==5.0.4
+rq==1.16.1
+pydantic==2.7.1
+ratelimit==2.2.1
 
 # --- AI & RAG Pipeline ---
 qdrant-client==1.10.1
 sentence-transformers==3.0.1
+onnxruntime==1.18.0
 google-auth==2.30.0
 google-generativeai==0.7.2
 groq==0.9.0

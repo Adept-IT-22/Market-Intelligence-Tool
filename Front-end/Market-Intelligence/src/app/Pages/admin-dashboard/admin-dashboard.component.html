@@ -1,0 +1,530 @@
+<app-base-layout>
+  <div class="admin-dashboard">
+    <!-- Header -->
+    <div class="dashboard-header">
+      <div class="header-left">
+        <mat-icon class="header-icon">admin_panel_settings</mat-icon>
+        <div>
+          <h1>Command Center</h1>
+          <p class="subtitle">System monitoring & access control</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <button class="refresh-btn" (click)="refreshStats()">
+          <mat-icon [class.spinning]="adminService.loading()">refresh</mat-icon>
+          <span>Refresh</span>
+        </button>
+        <div class="live-indicator" *ngIf="!adminService.loading()">
+          <span class="pulse-dot"></span>
+          <span>LIVE</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <mat-tab-group (selectedIndexChange)="onTabChange($event)" animationDuration="300ms" class="admin-tabs">
+
+      <!-- TAB 1: System Health -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon>monitor_heart</mat-icon>
+          <span>System Health</span>
+        </ng-template>
+
+        <div class="tab-content" *ngIf="adminService.stats() as stats">
+          <!-- Service Health Cards -->
+          <section class="section">
+            <h2 class="section-title">
+              <mat-icon>dns</mat-icon>
+              Service Status
+            </h2>
+            <div class="health-grid">
+              <!-- PostgreSQL -->
+              <div class="health-card" [ngClass]="getStatusClass(stats.health.postgres.status)">
+                <div class="card-header">
+                  <div class="service-icon postgres">
+                    <mat-icon>{{ getServiceIcon('postgresql') }}</mat-icon>
+                  </div>
+                  <div class="status-badge" [ngClass]="getStatusClass(stats.health.postgres.status)">
+                    <mat-icon>{{ getStatusIcon(stats.health.postgres.status) }}</mat-icon>
+                    <span>{{ stats.health.postgres.status }}</span>
+                  </div>
+                </div>
+                <h3>PostgreSQL</h3>
+                <p class="service-desc">Primary Database</p>
+                <p class="error-text" *ngIf="stats.health.postgres.error">{{ stats.health.postgres.error }}</p>
+              </div>
+
+              <!-- Redis -->
+              <div class="health-card" [ngClass]="getStatusClass(stats.health.redis.status)">
+                <div class="card-header">
+                  <div class="service-icon redis">
+                    <mat-icon>{{ getServiceIcon('redis') }}</mat-icon>
+                  </div>
+                  <div class="status-badge" [ngClass]="getStatusClass(stats.health.redis.status)">
+                    <mat-icon>{{ getStatusIcon(stats.health.redis.status) }}</mat-icon>
+                    <span>{{ stats.health.redis.status }}</span>
+                  </div>
+                </div>
+                <h3>Redis</h3>
+                <p class="service-desc">Cache & Queue</p>
+                <p class="error-text" *ngIf="stats.health.redis.error">{{ stats.health.redis.error }}</p>
+              </div>
+
+              <!-- Qdrant -->
+              <div class="health-card" [ngClass]="getStatusClass(stats.health.qdrant.status)">
+                <div class="card-header">
+                  <div class="service-icon qdrant">
+                    <mat-icon>{{ getServiceIcon('qdrant') }}</mat-icon>
+                  </div>
+                  <div class="status-badge" [ngClass]="getStatusClass(stats.health.qdrant.status)">
+                    <mat-icon>{{ getStatusIcon(stats.health.qdrant.status) }}</mat-icon>
+                    <span>{{ stats.health.qdrant.status }}</span>
+                  </div>
+                </div>
+                <h3>Qdrant</h3>
+                <p class="service-desc">Vector Search</p>
+                <p class="error-text" *ngIf="stats.health.qdrant.error">{{ stats.health.qdrant.error }}</p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Pipeline Stats -->
+          <section class="section">
+            <h2 class="section-title">
+              <mat-icon>conveyor_belt</mat-icon>
+              Ingestion Pipeline
+            </h2>
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-icon queued">
+                  <mat-icon>schedule</mat-icon>
+                </div>
+                <div class="stat-info">
+                  <span class="stat-value">{{ stats.queue.queued }}</span>
+                  <span class="stat-label">Queued</span>
+                </div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-icon active">
+                  <mat-icon>sync</mat-icon>
+                </div>
+                <div class="stat-info">
+                  <span class="stat-value">{{ stats.queue.active }}</span>
+                  <span class="stat-label">Active</span>
+                </div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-icon failed">
+                  <mat-icon>error_outline</mat-icon>
+                </div>
+                <div class="stat-info">
+                  <span class="stat-value">{{ stats.queue.failed }}</span>
+                  <span class="stat-label">Failed</span>
+                </div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-icon users-stat">
+                  <mat-icon>group</mat-icon>
+                </div>
+                <div class="stat-info">
+                  <span class="stat-value">{{ stats.user_count }}</span>
+                  <span class="stat-label">Users</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Storage Stats -->
+          <section class="section">
+            <h2 class="section-title">
+              <mat-icon>inventory_2</mat-icon>
+              Storage Overview
+            </h2>
+            <div class="storage-grid">
+              <div class="storage-card">
+                <div class="storage-header">
+                  <mat-icon>scatter_plot</mat-icon>
+                  <span>Total Vectors</span>
+                </div>
+                <span class="storage-value">{{ stats.storage.total_vectors | number }}</span>
+              </div>
+              <div class="storage-card">
+                <div class="storage-header">
+                  <mat-icon>folder</mat-icon>
+                  <span>Collections</span>
+                </div>
+                <span class="storage-value">{{ stats.storage.collections.length }}</span>
+              </div>
+              <div class="storage-card">
+                <div class="storage-header">
+                  <mat-icon>hard_drive</mat-icon>
+                  <span>DB Size</span>
+                </div>
+                <span class="storage-value">{{ stats.storage.db_size_mb }} MB</span>
+              </div>
+            </div>
+
+            <!-- Collections Table -->
+            <div class="collections-table" *ngIf="stats.storage.collections.length">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Collection</th>
+                    <th>Vectors</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr *ngFor="let col of stats.storage.collections">
+                    <td class="col-name">
+                      <mat-icon>view_in_ar</mat-icon>
+                      {{ col.name }}
+                    </td>
+                    <td>{{ col.points | number }}</td>
+                    <td>
+                      <span class="col-status" [ngClass]="col.status === 'green' ? 'status-healthy' : 'status-warning'">
+                        {{ col.status }}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <p class="timestamp">Last updated: {{ stats.timestamp }}</p>
+        </div>
+
+        <!-- Loading state -->
+        <div class="loading-state" *ngIf="!adminService.stats() && adminService.loading()">
+          <mat-icon class="spin">hourglass_empty</mat-icon>
+          <p>Loading system telemetry...</p>
+        </div>
+
+        <!-- Error state -->
+        <div class="error-state" *ngIf="adminService.error() as err">
+          <mat-icon>warning</mat-icon>
+          <p>{{ err }}</p>
+          <button class="retry-btn" (click)="refreshStats()">Retry</button>
+        </div>
+      </mat-tab>
+
+      <!-- TAB 2: User Access Control -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon>admin_panel_settings</mat-icon>
+          <span>User Access Control</span>
+        </ng-template>
+
+        <div class="tab-content">
+          <section class="section">
+            <div class="section-header">
+              <h2 class="section-title">
+                <mat-icon>group</mat-icon>
+                Registered Users
+              </h2>
+              <span class="user-count-badge">{{ adminService.users().length }} users</span>
+            </div>
+
+            <div class="users-table-wrapper">
+              <table class="users-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Joined</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr *ngFor="let user of adminService.users()" [class.is-self]="user.id === auth.currentUser()?.id">
+                    <td class="user-cell">
+                      <div class="user-avatar" [ngClass]="'role-' + user.role">
+                        {{ (user.display_name || user.email).charAt(0).toUpperCase() }}
+                      </div>
+                      <span class="user-name">{{ user.display_name || '—' }}</span>
+                    </td>
+                    <td class="email-cell">{{ user.email }}</td>
+                    <td>
+                      <select
+                        class="role-select"
+                        [ngClass]="'role-' + user.role"
+                        [ngModel]="user.role"
+                        (ngModelChange)="changeRole(user, $event)"
+                        [disabled]="user.id === auth.currentUser()?.id">
+                        <option value="admin">Admin</option>
+                        <option value="analyst">Analyst</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    </td>
+                    <td class="date-cell">{{ user.created_at }}</td>
+                    <td class="actions-cell">
+                      <ng-container *ngIf="user.id !== auth.currentUser()?.id">
+                        <button
+                          class="delete-btn"
+                          *ngIf="deleteConfirmId() !== user.id"
+                          (click)="confirmDelete(user.id)"
+                          title="Delete user">
+                          <mat-icon>delete_outline</mat-icon>
+                        </button>
+                        <div class="confirm-actions" *ngIf="deleteConfirmId() === user.id">
+                          <button class="confirm-yes" (click)="executeDelete(user.id)">
+                            <mat-icon>check</mat-icon>
+                          </button>
+                          <button class="confirm-no" (click)="cancelDelete()">
+                            <mat-icon>close</mat-icon>
+                          </button>
+                        </div>
+                      </ng-container>
+                      <span class="you-badge" *ngIf="user.id === auth.currentUser()?.id">You</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="empty-state" *ngIf="!adminService.users().length">
+              <mat-icon>person_off</mat-icon>
+              <p>No users found</p>
+            </div>
+          </section>
+
+          <!-- Role Legend -->
+          <section class="section role-legend">
+            <h3>Role Permissions</h3>
+            <div class="legend-grid">
+              <div class="legend-item">
+                <div class="legend-icon role-admin">
+                  <mat-icon>shield</mat-icon>
+                </div>
+                <div>
+                  <strong>Admin</strong>
+                  <p>Full access — manage users, view monitoring, all features</p>
+                </div>
+              </div>
+              <div class="legend-item">
+                <div class="legend-icon role-analyst">
+                  <mat-icon>analytics</mat-icon>
+                </div>
+                <div>
+                  <strong>Analyst</strong>
+                  <p>Query, upload, generate reports — no admin panel access</p>
+                </div>
+              </div>
+              <div class="legend-item">
+                <div class="legend-icon role-viewer">
+                  <mat-icon>visibility</mat-icon>
+                </div>
+                <div>
+                  <strong>Viewer</strong>
+                  <p>Read-only access — view queries and reports</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </mat-tab>
+
+      <!-- TAB 3: Ingestion History -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon>history</mat-icon>
+          <span>Ingestion History</span>
+        </ng-template>
+
+        <div class="tab-content">
+          <section class="section">
+            <!-- Filter & Search Bar -->
+            <div class="history-controls">
+              <div class="filter-group">
+                <button 
+                  class="filter-tab-btn" 
+                  [class.active]="historyStatus() === 'all'"
+                  (click)="onHistoryFilterChange('all')">
+                  All
+                </button>
+                <button 
+                  class="filter-tab-btn succeeded" 
+                  [class.active]="historyStatus() === 'succeeded'"
+                  (click)="onHistoryFilterChange('succeeded')">
+                  Succeeded
+                </button>
+                <button 
+                  class="filter-tab-btn failed" 
+                  [class.active]="historyStatus() === 'failed'"
+                  (click)="onHistoryFilterChange('failed')">
+                  Failed
+                </button>
+                <button 
+                  class="filter-tab-btn processing" 
+                  [class.active]="historyStatus() === 'processing'"
+                  (click)="onHistoryFilterChange('processing')">
+                  Processing
+                </button>
+                <button 
+                  class="filter-tab-btn queued" 
+                  [class.active]="historyStatus() === 'queued'"
+                  (click)="onHistoryFilterChange('queued')">
+                  Queued
+                </button>
+              </div>
+
+              <div class="search-box">
+                <mat-icon>search</mat-icon>
+                <input 
+                  type="text" 
+                  placeholder="Search by filename or department..." 
+                  [ngModel]="historySearch()" 
+                  (ngModelChange)="historySearch.set($event)"
+                  (keyup.enter)="onHistorySearch()"
+                  class="history-search-input">
+              </div>
+            </div>
+
+            <!-- Ingestion Jobs Table -->
+            <div class="jobs-table-wrapper" *ngIf="adminService.ingestionHistory().length">
+              <table class="jobs-table">
+                <thead>
+                  <tr>
+                    <th>File</th>
+                    <th>Size</th>
+                    <th>Department</th>
+                    <th>Pipeline</th>
+                    <th>Status</th>
+                    <th>Run Details</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <ng-container *ngFor="let job of adminService.ingestionHistory()">
+                    <tr [class.expanded]="expandedJobId() === job.id">
+                      <!-- File Info -->
+                      <td class="file-cell">
+                        <mat-icon class="file-icon">insert_drive_file</mat-icon>
+                        <div class="file-info-text">
+                          <span class="file-name" [title]="job.original_filename || job.filename">
+                            <!-- Show clickable link if SharePoint source_url is available -->
+                            <a 
+                              *ngIf="job.source_url" 
+                              [href]="job.source_url" 
+                              target="_blank" 
+                              class="sharepoint-link"
+                              title="Open in SharePoint">
+                              {{ job.original_filename || job.filename }}
+                              <mat-icon class="external-icon">open_in_new</mat-icon>
+                            </a>
+                            <span *ngIf="!job.source_url">
+                              {{ job.original_filename || job.filename }}
+                            </span>
+                          </span>
+                          <span class="task-id-sub">ID: {{ job.task_id }}</span>
+                        </div>
+                      </td>
+                      
+                      <!-- Size -->
+                      <td>
+                        <span class="size-text" *ngIf="job.file_size_kb != null">{{ job.file_size_kb | number:'1.1-1' }} KB</span>
+                        <span class="size-text" *ngIf="job.file_size_kb == null">—</span>
+                      </td>
+                      
+                      <!-- Department -->
+                      <td>
+                        <span class="dept-badge">{{ job.department }}</span>
+                      </td>
+                      
+                      <!-- Pipeline -->
+                      <td>
+                        <span class="pipeline-text">{{ job.pipeline_type || '—' }}</span>
+                      </td>
+                      
+                      <!-- Status -->
+                      <td>
+                        <div class="status-badge" [ngClass]="getJobStatusClass(job.status)">
+                          <mat-icon class="badge-icon" [class.spinning]="job.status === 'processing'">
+                            {{ getJobStatusIcon(job.status) }}
+                          </mat-icon>
+                          <span>{{ job.status }}</span>
+                        </div>
+                      </td>
+                      
+                      <!-- Run Details -->
+                      <td class="time-cell">
+                        <div class="time-details">
+                          <span class="time-main" *ngIf="job.started_at">
+                            {{ job.started_at | date:'MMM d, h:mm a' }}
+                          </span>
+                          <span class="time-sub" *ngIf="job.duration_seconds != null">
+                            Duration: {{ job.duration_seconds | number:'1.1-1' }}s
+                          </span>
+                          <span class="time-sub" *ngIf="job.status === 'queued'">
+                            Enqueued: {{ job.created_at | date:'MMM d, h:mm a' }}
+                          </span>
+                        </div>
+                      </td>
+                      
+                      <!-- Row Expansion Trigger -->
+                      <td class="actions-cell">
+                        <button 
+                          *ngIf="job.status === 'failed'"
+                          class="expand-btn" 
+                          (click)="toggleExpandJob(job.id)"
+                          [title]="expandedJobId() === job.id ? 'Hide error' : 'Show error'">
+                          <mat-icon>{{ expandedJobId() === job.id ? 'expand_less' : 'expand_more' }}</mat-icon>
+                        </button>
+                        <span *ngIf="job.status !== 'failed'">—</span>
+                      </td>
+                    </tr>
+                    
+                    <!-- Expanded Row for Error message -->
+                    <tr *ngIf="expandedJobId() === job.id && job.status === 'failed'" class="error-detail-row">
+                      <td colspan="7">
+                        <div class="error-detail-container">
+                          <div class="error-detail-header">
+                            <mat-icon>error_outline</mat-icon>
+                            <span>Error Trace / Message</span>
+                          </div>
+                          <pre class="error-detail-body">{{ job.error_message }}</pre>
+                        </div>
+                      </td>
+                    </tr>
+                  </ng-container>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Empty State for History -->
+            <div class="empty-state" *ngIf="!adminService.ingestionHistory().length && !adminService.loading()">
+              <mat-icon>history_toggle_off</mat-icon>
+              <p>No ingestion runs match the current criteria.</p>
+            </div>
+
+            <!-- History Pagination -->
+            <div class="pagination-bar" *ngIf="adminService.ingestionHistoryCount() > 0">
+              <span class="pagination-info">
+                Showing {{ historyOffset() + 1 }} - 
+                {{ historyOffset() + adminService.ingestionHistory().length }} 
+                of {{ adminService.ingestionHistoryCount() }} runs
+              </span>
+              <div class="pagination-buttons">
+                <button 
+                  class="pag-btn" 
+                  [disabled]="historyOffset() === 0"
+                  (click)="onHistoryPageChange('prev')">
+                  <mat-icon>chevron_left</mat-icon>
+                </button>
+                <button 
+                  class="pag-btn" 
+                  [disabled]="historyOffset() + historyLimit() >= adminService.ingestionHistoryCount()"
+                  (click)="onHistoryPageChange('next')">
+                  <mat-icon>chevron_right</mat-icon>
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+  </div>
+</app-base-layout>
