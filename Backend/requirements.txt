@@ -13,6 +13,7 @@ redis==5.0.4
 rq==1.16.1
 pydantic==2.7.1
 ratelimit==2.2.1
+numpy==1.26.4
 
 # --- AI & RAG Pipeline ---
 qdrant-client==1.10.1
