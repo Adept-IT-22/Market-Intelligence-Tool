@@ -32,6 +32,13 @@ CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 # Initialize chat tables
 init_chat_tables()
 
+# Initialize PostgreSQL database schema (auto-creates tables if they don't exist)
+try:
+    from db_migration import init_postgres_db
+    init_postgres_db()
+except Exception as e:
+    logger.warning(f"Auto database migration failed at startup: {e}")
+
 #========QDRANT CONFIGS=========
 load_dotenv()
 host = os.getenv("QDRANT_HOST", "localhost")
