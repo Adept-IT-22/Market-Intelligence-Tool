@@ -8,10 +8,16 @@ load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [Worker:%(worker_id)s] - %(message)s')
-logger = logging.getLogger(__name__)
+raw_logger = logging.getLogger(__name__)
 
 # Mock worker ID for lineage
 WORKER_ID = f"worker_{os.getpid()}"
+
+class WorkerAdapter(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        return msg, {**kwargs, 'extra': {**(kwargs.get('extra') or {}), 'worker_id': WORKER_ID}}
+
+logger = WorkerAdapter(raw_logger, {'worker_id': WORKER_ID})
 
 def update_job_history(task_id: str, status: str, error_message: str = None, start: bool = False, complete: bool = False, duration: float = None):
     try:
@@ -42,7 +48,10 @@ def update_job_history(task_id: str, status: str, error_message: str = None, sta
         cur.close()
         conn.close()
     except Exception as e:
-        logger.error(f"Failed to update ingestion history for task {task_id}: {e}")
+        logger.error(
+            f"Failed to update ingestion history for task {task_id}: {e}",
+            extra={"worker_id": WORKER_ID}
+        )
 
 def process_ingestion_job(metadata_dict: dict, pipeline_type: str):
     """

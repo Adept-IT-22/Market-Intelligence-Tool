@@ -377,7 +377,8 @@
                   type="text" 
                   placeholder="Search by filename or department..." 
                   [ngModel]="historySearch()" 
-                  (ngModelChange)="historySearch.set($event); onHistorySearch()"
+                  (ngModelChange)="historySearch.set($event)"
+                  (keyup.enter)="onHistorySearch()"
                   class="history-search-input">
               </div>
             </div>
@@ -424,8 +425,8 @@
                       
                       <!-- Size -->
                       <td>
-                        <span class="size-text" *ngIf="job.file_size_kb">{{ job.file_size_kb | number:'1.1-1' }} KB</span>
-                        <span class="size-text" *ngIf="!job.file_size_kb">—</span>
+                        <span class="size-text" *ngIf="job.file_size_kb != null">{{ job.file_size_kb | number:'1.1-1' }} KB</span>
+                        <span class="size-text" *ngIf="job.file_size_kb == null">—</span>
                       </td>
                       
                       <!-- Department -->
@@ -454,7 +455,7 @@
                           <span class="time-main" *ngIf="job.started_at">
                             {{ job.started_at | date:'MMM d, h:mm a' }}
                           </span>
-                          <span class="time-sub" *ngIf="job.duration_seconds">
+                          <span class="time-sub" *ngIf="job.duration_seconds != null">
                             Duration: {{ job.duration_seconds | number:'1.1-1' }}s
                           </span>
                           <span class="time-sub" *ngIf="job.status === 'queued'">

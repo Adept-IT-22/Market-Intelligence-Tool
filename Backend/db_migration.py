@@ -16,7 +16,7 @@ def get_db_connection():
         port=os.getenv("POSTGRES_PORT", "5432"),
         database=os.getenv("POSTGRES_DB", "market_intelligence"),
         user=os.getenv("POSTGRES_USER", "postgres"),
-        password=os.getenv("POSTGRES_PASSWORD", "your_password_here")
+        password=os.environ["POSTGRES_PASSWORD"]
     )
 
 def init_postgres_db():
@@ -131,7 +131,7 @@ def init_postgres_db():
                     cur.execute("""
                         INSERT INTO ingestion_history 
                         (task_id, filename, original_filename, file_size_kb, department, source_url, pipeline_type, status, error_message, started_at, completed_at, duration_seconds, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, 'succeeded', NULL, %s, %s, 10.0, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, 'succeeded', NULL, %s, %s, NULL, %s)
                     """, (t_id, title, title, 0.0, department or 'General', source, pipeline, processed_at, processed_at, processed_at))
                     logger.info(f"Backpopulated task {t_id} for file {title}")
         except Exception as pop_err:

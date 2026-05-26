@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 import redis
 from rq import Queue, Retry
+from rq.registry import FailedJobRegistry
 from ratelimit import limits, sleep_and_retry
 
 # Configure logging
@@ -75,8 +76,7 @@ class AIEnricher:
         self.google_api_key = google_api_key
         self.groq_api_key = groq_api_key
 
-    @sleep_and_retry
-    @limits(calls=15, period=60)  # Example: 15 calls per minute
+
     def enrich(self, text: str, context: str = "general") -> Dict[str, Any]:
         """Calls Gemini or Groq to enrich the data."""
         # TODO: Implement actual LLM calls here
@@ -103,7 +103,7 @@ class EngineManager:
         redis_url = f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}"
         self.redis = redis.from_url(redis_url)
         self.queue = Queue("ingestion", connection=self.redis)
-        self.failed_queue = Queue("failed_jobs", connection=self.redis)
+        self.failed_registry = FailedJobRegistry(queue=self.queue)
 
     def dispatch_task(self, file_path: str, source_type: str, department: str, source_url: Optional[str] = None, original_filename: Optional[str] = None):
         """Pushes a new ingestion task to the queue."""

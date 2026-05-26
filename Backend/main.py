@@ -303,6 +303,7 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @app.route('/uploads/<path:filename>', methods=['GET'])
+@jwt_required
 def serve_upload(filename):
     """Serve uploaded files directly so they are downloadable from references."""
     return send_from_directory(UPLOAD_FOLDER, filename)
@@ -459,6 +460,7 @@ def upload_file():
         return {"error": "Failed to save file"}, 500
 
 @app.route('/ingest/status/<task_id>', methods=['GET'])
+@jwt_required
 def get_ingest_status(task_id):
     """Return the status of an ingestion task."""
     from engine_manager import EngineManager
@@ -467,15 +469,23 @@ def get_ingest_status(task_id):
     return jsonify(status), 200
 
 @app.route('/ingest/failed', methods=['GET'])
+@jwt_required
+@admin_required
 def get_failed_tasks():
     """Return all failed tasks (Dead Letter Queue)."""
     from engine_manager import EngineManager
+    from rq.job import Job
     engine_mgr = EngineManager()
-    # Accessing the failed queue directly for stats
-    failed_jobs = engine_mgr.failed_queue.jobs
+    
+    # Accessing the failed job registry
+    failed_job_ids = engine_mgr.failed_registry.get_job_ids()
+    jobs = Job.fetch_many(failed_job_ids[:50], connection=engine_mgr.redis)
+    # Filter out None values just in case a job was deleted
+    valid_jobs = [j for j in jobs if j is not None]
+    
     return jsonify({
-        "count": len(failed_jobs),
-        "tasks": [{"id": j.id, "created_at": j.created_at} for j in failed_jobs[:50]]
+        "count": engine_mgr.failed_registry.count,
+        "tasks": [{"id": j.id, "created_at": j.created_at} for j in valid_jobs]
     }), 200
 
 @app.route('/health', methods=['GET'])

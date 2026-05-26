@@ -3,7 +3,6 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTabsModule } from '@angular/material/tabs';
-import { MatMenuModule } from '@angular/material/menu';
 import { BaseLayoutComponent } from '../../@shared/components/base-layout/base-layout.component';
 import { AdminService, AdminUser } from '../../@shared/services/admin.service';
 import { AuthService } from '../../@shared/services/auth.service';
@@ -16,7 +15,6 @@ import { AuthService } from '../../@shared/services/auth.service';
     FormsModule,
     MatIconModule,
     MatTabsModule,
-    MatMenuModule,
     BaseLayoutComponent
   ],
   templateUrl: './admin-dashboard.component.html',

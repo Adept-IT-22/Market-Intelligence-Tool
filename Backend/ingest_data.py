@@ -57,7 +57,7 @@ class DataIngester:
             port=os.getenv("POSTGRES_PORT", "5432"),
             database=os.getenv("POSTGRES_DB", "market_intelligence"),
             user=os.getenv("POSTGRES_USER", "postgres"),
-            password=os.getenv("POSTGRES_PASSWORD", "your_password_here")
+            password=os.environ["POSTGRES_PASSWORD"]
         )
         self.cursor = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         self.task_metadata = task_metadata or {}
@@ -341,6 +341,9 @@ class DataIngester:
         """)
 
     def _process_excel(self, file_path, master_id, routing_table_name, sectors, department):
+        from sqlalchemy import create_engine
+        db_url = f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}/{os.getenv('POSTGRES_DB')}"
+        engine = create_engine(db_url)
         try:
             xls = pd.ExcelFile(file_path)
             for sheet_name in xls.sheet_names:
@@ -359,9 +362,6 @@ class DataIngester:
                 self._validate_table_name(detail_table_name)
                 
                 # Use SQLAlchemy engine for to_sql (Postgres requires it)
-                from sqlalchemy import create_engine
-                db_url = f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}/{os.getenv('POSTGRES_DB')}"
-                engine = create_engine(db_url)
                 df.to_sql(detail_table_name, engine, if_exists='replace', index=False)
                 
                 self.cursor.execute(f"""
@@ -372,6 +372,8 @@ class DataIngester:
         except Exception as e:
             logger.error(f"Excel processing failed for {file_path}: {e}")
             raise e
+        finally:
+            engine.dispose()
 
     def _process_pdf(self, file_path, master_id, routing_table_name, sectors, department):
         try:
