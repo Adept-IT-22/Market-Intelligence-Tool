@@ -1,5 +1,7 @@
 import os
 import sqlite3
+import psycopg2
+from psycopg2 import extras
 import pandas as pd
 import httpx
 import asyncio
@@ -13,7 +15,7 @@ import logging
 import json
 import re
 from urllib.parse import urlparse
-from typing import Optional, Any, Generator, AsyncGenerator
+from typing import Optional, Any, Generator, AsyncGenerator, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 import queue
 import threading
@@ -104,8 +106,23 @@ _CACHED_EMBEDDINGS = None
 def get_embeddings_model():
     global _CACHED_EMBEDDINGS
     if _CACHED_EMBEDDINGS is None:
-        logger.info("Loading Embedding Model (Cached)...")
-        _CACHED_EMBEDDINGS = SentenceTransformer(EMBEDDING_MODEL)
+        logger.info("Loading ONNX Embedding Model (Cached)...")
+        from onnx_transformer import ONNXTransformer
+        model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_onnx")
+        
+        # Self-initialize/export if not exists
+        if not os.path.exists(model_dir) or not os.path.exists(os.path.join(model_dir, "vocab.txt")):
+            logger.info("Exporting BAAI/bge-small-en model to ONNX format...")
+            from optimum.onnxruntime import ORTModelForFeatureExtraction
+            from transformers import AutoTokenizer
+            
+            os.makedirs(model_dir, exist_ok=True)
+            model = ORTModelForFeatureExtraction.from_pretrained("BAAI/bge-small-en", export=True)
+            model.save_pretrained(model_dir)
+            tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-small-en")
+            tokenizer.save_pretrained(model_dir)
+            
+        _CACHED_EMBEDDINGS = ONNXTransformer(model_dir)
     return _CACHED_EMBEDDINGS
 
 # --- Gemini API Internal (Vertex) ---
@@ -371,20 +388,62 @@ def call_gemini_stream_sync(prompt_or_parts: Any):
     finally:
         stop_event.set()
 
+# --- Elite Query Router ---
+
+class QueryRouter:
+    """Intelligently routes user queries to the appropriate engine."""
+    
+    @staticmethod
+    def route(query: str) -> str:
+        """Classifies query as 'sql', 'rag', or 'general'."""
+        prompt = (
+            "You are a Precision Query Router for a Market Intelligence Tool.\n"
+            "Classify the following user query into one of three categories:\n"
+            "1. 'sql': If the query requires structured data, metrics, counts, or analytics (e.g., 'how many', 'top agent', 'sum of').\n"
+            "2. 'rag': If the query is semantic, seeking knowledge from documents, policies, or qualitative info.\n"
+            "3. 'general': If the query is a greeting, small talk, or generic tool question.\n\n"
+            f"Query: \"{query}\"\n\n"
+            "Output ONLY the category name."
+        )
+        try:
+            category = call_gemini_sync(prompt).lower().strip()
+            if category in ['sql', 'rag', 'general']:
+                logger.info(f"QueryRouter: Routed to {category}")
+                return category
+            return "rag" # Default fallback
+        except Exception as e:
+            logger.error(f"QueryRouter failed: {e}")
+            return "rag"
+
 class AgentManager:
     def __init__(
         self,
         llm_model_name: str = GEMINI_MODEL_NAME,
-        database_path: str = DATABASE_PATH,
-        collection_name: str = COLLECTION_NAME,
+        llm_context: str = "general",
         query: str = 'No prompt entered.',
         chat_history: list = None
     ):
         self.llm_model_name = llm_model_name
-        self.database_path = database_path
-        self.collection_name = collection_name
         self.query = query
         self.chat_history = chat_history or []
+        self.router = QueryRouter()
+        
+        # Postgres Connection (Optional/Non-fatal)
+        try:
+            self.conn = psycopg2.connect(
+                host=os.getenv("POSTGRES_HOST", "localhost"),
+                port=os.getenv("POSTGRES_PORT", "5432"),
+                database=os.getenv("POSTGRES_DB", "market_intelligence"),
+                user=os.getenv("POSTGRES_USER", "postgres"),
+                password=os.getenv("POSTGRES_PASSWORD", "your_password_here")
+            )
+            self.cursor = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            logger.info("Successfully connected to PostgreSQL database.")
+        except psycopg2.OperationalError as e:
+            logger.warning(f"PostgreSQL connection failed: {e}. Falling back to SQLite-only mode for query pipeline.")
+            self.conn = None
+            self.cursor = None
+        
         self.image_parts = []
         self._detect_images()
         
@@ -426,6 +485,8 @@ class AgentManager:
         # Initialize Qdrant
         logger.info("Initializing Qdrant client")
         self.qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        self.collection_name = COLLECTION_NAME
+        self.database_path = DATABASE_PATH
 
         # Gemini logic is handled via call_gemini_sync
         logger.info(f"Configuring Gemini LLM ({self.llm_model_name})")
@@ -620,71 +681,24 @@ class AgentManager:
         df_master = pd.read_sql_query(query, conn, params=safe_candidates)
         conn.close()
 
-        # 3. Use LLM to pick the absolute best ones (Capped at 8 to avoid Level 2 overflow)
+        # 3. FAST PATH: Return top candidates without LLM (saving ~5-8s)
         # Priority: High confidence keyword matches come first, then others
         master_text = ""
         for _, row in df_master.iterrows():
             prefix = "[HIGH CONFIDENCE] " if row['table_name'] in high_confidence_keyword_tables else ""
             master_text += f"- {prefix}Table: {row['table_name']} | Title: {row['Title']} | Summary: {row['Summary']}\n"
 
-        system_prompt = (
-            "You are a Senior Strategic Researcher. "
-            "Review the available data sources and select the TOP 8 tables most relevant to the query. "
-            "CRITICAL: If the query asks for a CORRELATION between two contexts (e.g., 'Market trends' vs 'Adept projects'), you MUST select at least 3 tables from EACH context to allow the final layer to connect them. "
-            "ALWAYS prioritize the 'Title' as it contains the true topic. Many 'Summary' fields of Adept internal docs are generic marketing text—do not let that deter you from selecting them if the Title matches the query. "
-            "Prioritize sources with '[HIGH CONFIDENCE]' if they match the query keywords. "
-            "Return a COMMA-SEPARATED list of 'table_name' strings only."
-        )
-        
-        user_prompt = f"""
-        User Query: "{self.query}"
-        
-        --- Available Sources ---
-        {master_text}
-        
-        Return top 8 table names (comma-separated):
-        If the query mentions a 'process', 'workflow', or 'step-by-step', prioritizing tables with those words in the title is mandatory.
-        """
+        routing_tables = []
+        for kw_table in high_confidence_keyword_tables:
+            if re.match(r'^[a-z0-9_]+$', kw_table):
+                routing_tables.append(kw_table)
+                
+        for cand in safe_candidates:
+            if cand not in routing_tables and len(routing_tables) < 8:
+                routing_tables.append(cand)
 
-        try:
-            content = call_gemini_sync(user_prompt)
-            logger.info(f"Level 1 Raw Response: {content.strip()}")
-            # CLEANING: Extract anything that looks like a table name
-            # Tables can be 'route_...' or simple names like 'Project', 'Worker'
-            # We filter against the actual safe_candidates we provided to the LLM
-            possible_tables = [t.strip().strip('"').strip("'").strip("`").strip() for t in content.replace('\n', ',').split(',') if t.strip()]
-            
-            routing_tables = []
-            for t in possible_tables:
-                # Direct match or fuzzy match (e.g. "The Project table" -> "Project")
-                for cand in safe_candidates:
-                    if cand.lower() in t.lower():
-                        routing_tables.append(cand)
-                        break
-            
-            # Remove duplicates while preserving order
-            seen = set()
-            routing_tables = [x for x in routing_tables if not (x in seen or seen.add(x))]
-            
-            # FINAL CAP: Ensure no more than 8 tables are processed by Level 2
-            if len(routing_tables) > 8:
-                logger.warning(f"Cutting routing selection from {len(routing_tables)} to 8 for prompt safety.")
-                routing_tables = routing_tables[:8]
-            
-            # Auto-include high-confidence matches if missed, but keep total <= 8
-            for kw_table in high_confidence_keyword_tables:
-                if kw_table not in routing_tables and len(routing_tables) < 8:
-                    if re.match(r'^[a-z0-9_]+$', kw_table):
-                         logger.info(f"Auto-including high-confidence keyword match: {kw_table}")
-                         routing_tables.append(kw_table)
-
-            logger.info(f"Level 1 Selected: {routing_tables}")
-            return routing_tables, master_text
-        except Exception as e:
-            logger.error(f"Master Routing failed: {e}")
-            # Fallback: return high-confidence keyword matches capped at 8
-            fallback = [t for t in high_confidence_keyword_tables if re.match(r'^[a-z0-9_]+$', t)]
-            return fallback[:8], master_text
+        logger.info(f"Level 1 Selected (Fast Path): {routing_tables}")
+        return routing_tables, master_text
 
     def get_routing_response(self, routing_tables: list):
         """
@@ -733,45 +747,10 @@ class AgentManager:
         if not combined_routing_data:
             return {'sql_tables': [], 'qdrant_ids': []}
 
-        system_prompt = (
-            "You are a Precision Data Scout. "
-            "Review the specific entries from the selected sources (Routing Tables). "
-            "Identify the specific 'table_name' (for SQL/Excel) or 'qdrant_point_id' (for Text) that contain the answer. "
-            "CRITICAL: If the user is asking about company projects, PRIORITIZE internal sources even if they only contain page/part references. "
-            "If the query requires connecting two topics (Market vs Internal), ensure you select the BEST identifiers for BOTH topics."
-            "Return a JSON object with two keys: 'sql_tables' (list of strings) and 'qdrant_ids' (list of strings)."
-        )
-        
-        user_prompt = f"""
-        User Query: "{self.query}"
-        
-        --- Routing Data ---
-        {combined_routing_data}
-        
-        Output JSON: {{ "sql_tables": ["name1", ...], "qdrant_ids": ["id1", ...] }}
-        """
-
-        try:
-            content = call_gemini_sync(user_prompt)
-            
-            try:
-                # CLEANING: Robustly extract the first JSON object using regex
-                match = re.search(r'\{.*\}', content, re.DOTALL)
-                if match:
-                    content_clean = match.group(0)
-                    result = json.loads(content_clean)
-                    logger.info(f"Level 2 Selected: {result}")
-                    return result
-                else:
-                    logger.warning("No JSON object found in Level 2 response.")
-                    return {'sql_tables': [], 'qdrant_ids': []}
-            except json.JSONDecodeError as je:
-                logger.error(f"JSON Decode Error in Routing Response: {je} | Raw Content: {content[:200]}")
-                return {'sql_tables': [], 'qdrant_ids': []}
-
-        except Exception as e:
-            logger.error(f"Routing logic failed: {e}")
-            return {'sql_tables': [], 'qdrant_ids': []}
+        # FAST PATH: Skip L2 LLM evaluation (saving ~5-8s)
+        # Simply return the top routing tables to be processed by get_detail_content
+        logger.info(f"Level 2 Selected (Fast Path): {routing_tables}")
+        return {'sql_tables': routing_tables[:4], 'qdrant_ids': []}
 
     def get_detail_content(self, selection: dict):
         """
