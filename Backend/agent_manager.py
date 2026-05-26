@@ -53,7 +53,7 @@ def _build_system_prompt(chat_history=None) -> str:
         "'Local' means within Kenya. Always interpret geographic terms relative to Kenya as the home base.\n\n"
         "Instructions:\n"
         "1. Prioritize provided context. If the answer is not in the context, say so.\n"
-        "2. Keep responses professional, data-driven, and highly structured using clear Markdown.\n"
+        "2. Keep responses professional, data-driven, and highly structured using clear Markdown. Do not use triple asterisks (***) for formatting; use double asterisks (**) for bold and single asterisks (*) for italic to ensure clean rendering.\n"
         "3. EXTRACT AND PRESENT DATA: You MUST extract specific facts, metrics, prices, and insights from the documents and include them directly in your response. DO NOT just provide file links or tell the user to read the documents. Actually answer their question using the data.\n"
         "4. INLINE CITATIONS: When citing sources in the text, use ONLY the markdown link format: [Filename](URI).\n"
         "   - Display text = clean filename ONLY (e.g., 'MarketReport.pdf'). NEVER use internal table names like 'route_...' or 'detail_...'.\n"
