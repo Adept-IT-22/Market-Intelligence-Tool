@@ -897,7 +897,7 @@
   }
 
   .file-icon {
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--text-secondary, rgba(255, 255, 255, 0.35));
     font-size: 22px;
     width: 22px;
     height: 22px;
@@ -916,7 +916,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: rgba(255, 255, 255, 0.9);
+    color: var(--text-primary, rgba(255, 255, 255, 0.9));
 
     .sharepoint-link {
       color: #a78bfa;
