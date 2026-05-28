@@ -6,6 +6,8 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { BaseLayoutComponent } from '../../@shared/components/base-layout/base-layout.component';
 import { AdminService, AdminUser } from '../../@shared/services/admin.service';
 import { AuthService } from '../../@shared/services/auth.service';
+import { MatDialog } from '@angular/material/dialog';
+import { AuthModalComponent } from '../../@shared/components/auth-modal/auth-modal.component';
 
 @Component({
   selector: 'app-admin-dashboard',
@@ -34,8 +36,34 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   constructor(
     public adminService: AdminService,
-    public auth: AuthService
+    public auth: AuthService,
+    private dialog: MatDialog
   ) {}
+
+  isAuthError(err: string | null): boolean {
+    if (!err) return false;
+    const lower = err.toLowerCase();
+    return lower.includes('authorization') || 
+           lower.includes('token') || 
+           lower.includes('signature') || 
+           lower.includes('expired') || 
+           lower.includes('only admin') || 
+           lower.includes('admin only') ||
+           lower.includes('admins only') ||
+           lower.includes('unauthorized');
+  }
+
+  openAdminLogin() {
+    const dialogRef = this.dialog.open(AuthModalComponent, {
+      width: '450px',
+      panelClass: 'auth-dialog'
+    });
+    dialogRef.afterClosed().subscribe(() => {
+      if (this.auth.isAdmin()) {
+        this.refreshStats();
+      }
+    });
+  }
 
   ngOnInit() {
     this.adminService.startAutoRefresh(15000);
