@@ -365,7 +365,7 @@ def upload_file():
                     try_json = "{" + body_str + "}"
                     try:
                         import json
-                        data = json.loads(try_json)
+                        data = json.loads(try_json, strict=False)
                         is_valid_json = True
                         logger.info("JSON upload - Recovered malformed JSON missing outer braces successfully")
                     except Exception as parse_err:
@@ -375,7 +375,7 @@ def upload_file():
                 if not is_valid_json and body_str.startswith('{'):
                     try:
                         import json
-                        data = json.loads(body_str)
+                        data = json.loads(body_str, strict=False)
                         is_valid_json = True
                     except Exception as json_err:
                         logger.info(f"Not valid JSON: {json_err}")
