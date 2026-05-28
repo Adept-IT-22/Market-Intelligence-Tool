@@ -309,6 +309,63 @@ MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def extract_wrapped_binary(raw_body):
+    """
+    Detects and extracts raw binary content and metadata from a payload that is 
+    accidentally wrapped in JSON format (common in Power Automate).
+    """
+    if not raw_body:
+        return None, None, None, False, raw_body
+
+    # Try decoding a small part of the beginning and end to inspect metadata
+    try:
+        head = raw_body[:2000].decode('utf-8', errors='ignore')
+        tail = raw_body[-2000:].decode('utf-8', errors='ignore')
+    except Exception:
+        return None, None, None, False, raw_body
+    
+    is_wrapped = False
+    if '"body":' in head and '"fileName":' in tail:
+        is_wrapped = True
+    elif '{"body":' in head and '"fileName":' in tail:
+        is_wrapped = True
+        
+    if not is_wrapped:
+        return None, None, None, False, raw_body
+
+    import re
+    # Extract metadata using regex from head/tail
+    filename = None
+    department = "General"
+    source_url = None
+    
+    fn_match = re.search(r'"fileName"\s*:\s*"([^"]+)"', tail, re.IGNORECASE) or re.search(r'"fileName"\s*:\s*"([^"]+)"', head, re.IGNORECASE)
+    if fn_match:
+        filename = fn_match.group(1)
+        
+    dept_match = re.search(r'"(?:source|department|category)"\s*:\s*"([^"]+)"', tail, re.IGNORECASE) or re.search(r'"(?:source|department|category)"\s*:\s*"([^"]+)"', head, re.IGNORECASE)
+    if dept_match:
+        department = dept_match.group(1)
+        
+    url_match = re.search(r'"(?:source_url|link|url)"\s*:\s*"([^"]*)"', tail, re.IGNORECASE) or re.search(r'"(?:source_url|link|url)"\s*:\s*"([^"]*)"', head, re.IGNORECASE)
+    if url_match:
+        source_url = url_match.group(1) or None
+
+    # Strip the wrapper from the raw bytes to recover the clean binary data
+    prefix_match = re.search(r'(?:"body"\s*:\s*\{\s*)?["\']\$content["\']\s*:\s*["\']', head)
+    if not prefix_match:
+        prefix_match = re.search(r'(?:"body"\s*:\s*\{\s*)?["\']content["\']\s*:\s*["\']', head)
+        
+    if prefix_match:
+        prefix_len = prefix_match.end()
+        suffix_match = re.search(r'["\']\s*,\s*["\']fileName["\']\s*:', tail)
+        if suffix_match:
+            suffix_offset_from_end = len(tail) - suffix_match.start()
+            clean_content = raw_body[prefix_len : -suffix_offset_from_end]
+            return filename, department, source_url, True, clean_content
+
+    return filename, department, source_url, False, raw_body
+
 @app.route('/uploads/<path:filename>', methods=['GET'])
 @jwt_required
 def serve_upload(filename):
@@ -343,83 +400,95 @@ def upload_file():
             # 1. Get raw data first
             raw_body = request.get_data()
             
-            # 2. Try to parse as JSON regardless of Content-Type
-            is_valid_json = False
-            data = None
-            
-            # Try decoding to string first to check for JSON patterns
-            body_str = ""
-            try:
-                if raw_body:
-                    body_str = raw_body.decode('utf-8', errors='ignore').strip()
-            except Exception as decode_err:
-                logger.info(f"Failed to decode body string: {decode_err}")
-
-            if body_str:
-                # Remove common Windows/Microsoft BOM characters if present
-                if body_str.startswith('\ufeff'):
-                    body_str = body_str[1:]
+            # Check for wrapped binary content first (Power Automate anomaly)
+            ext_filename, ext_dept, ext_url, is_wrapped, clean_content = extract_wrapped_binary(raw_body)
+            if is_wrapped:
+                content = clean_content
+                filename = request.headers.get('X-File-Name') or ext_filename or filename
+                # Set dummy data for department and source_url extraction
+                data = {
+                    "department": ext_dept,
+                    "source_url": ext_url
+                }
+                logger.info(f"JSON upload - Detected and recovered wrapped binary '{filename}' for dept '{ext_dept}' successfully")
+            else:
+                # 2. Try to parse as JSON regardless of Content-Type
+                is_valid_json = False
+                data = None
                 
-                # Check for missing outer curly braces (common Power Automate anomaly e.g. "body": { ... })
-                if (body_str.startswith('"body"') or body_str.startswith('body')) and not body_str.startswith('{'):
-                    try_json = "{" + body_str + "}"
-                    try:
-                        import json
-                        data = json.loads(try_json, strict=False)
-                        is_valid_json = True
-                        logger.info("JSON upload - Recovered malformed JSON missing outer braces successfully")
-                    except Exception as parse_err:
-                        logger.info(f"BOM/Brace wrapped JSON parsing failed: {parse_err}")
+                # Try decoding to string first to check for JSON patterns
+                body_str = ""
+                try:
+                    if raw_body:
+                        body_str = raw_body.decode('utf-8', errors='ignore').strip()
+                except Exception as decode_err:
+                    logger.info(f"Failed to decode body string: {decode_err}")
 
-                # If not already parsed and starts with '{', parse standard JSON
-                if not is_valid_json and body_str.startswith('{'):
-                    try:
-                        import json
-                        data = json.loads(body_str, strict=False)
-                        is_valid_json = True
-                    except Exception as json_err:
-                        logger.info(f"Not valid JSON: {json_err}")
+                if body_str:
+                    # Remove common Windows/Microsoft BOM characters if present
+                    if body_str.startswith('\ufeff'):
+                        body_str = body_str[1:]
+                    
+                    # Check for missing outer curly braces (common Power Automate anomaly e.g. "body": { ... })
+                    if (body_str.startswith('"body"') or body_str.startswith('body')) and not body_str.startswith('{'):
+                        try_json = "{" + body_str + "}"
+                        try:
+                            import json
+                            data = json.loads(try_json, strict=False)
+                            is_valid_json = True
+                            logger.info("JSON upload - Recovered malformed JSON missing outer braces successfully")
+                        except Exception as parse_err:
+                            logger.info(f"BOM/Brace wrapped JSON parsing failed: {parse_err}")
 
-            # 3. If successfully parsed as JSON, extract the content
-            if is_valid_json and isinstance(data, dict):
-                # If the outer dict has only "body" (due to recovery wrapping), unpack it
-                if len(data) == 1 and 'body' in data and isinstance(data['body'], dict):
-                    data = data['body']
-                    logger.info("JSON upload - Unpacked inner 'body' dict from wrapped JSON payload")
+                    # If not already parsed and starts with '{', parse standard JSON
+                    if not is_valid_json and body_str.startswith('{'):
+                        try:
+                            import json
+                            data = json.loads(body_str, strict=False)
+                            is_valid_json = True
+                        except Exception as json_err:
+                            logger.info(f"Not valid JSON: {json_err}")
 
-                logger.info(f"JSON upload - Keys received: {list(data.keys())}")
-                
-                # Extract filename, category, and source URL
-                filename = request.headers.get('X-File-Name') or data.get('fileName') or data.get('filename') or filename
-                body = data.get('$content') or data.get('content') or data.get('body') or ''
+                # 3. If successfully parsed as JSON, extract the content
+                if is_valid_json and isinstance(data, dict):
+                    # If the outer dict has only "body" (due to recovery wrapping), unpack it
+                    if len(data) == 1 and 'body' in data and isinstance(data['body'], dict):
+                        data = data['body']
+                        logger.info("JSON upload - Unpacked inner 'body' dict from wrapped JSON payload")
 
-                # Check if body content is base64 encoded or a raw text string
-                import base64
-                import re
-                
-                is_base64 = False
-                if isinstance(body, str):
-                    clean_body = re.sub(r'\s+', '', body)
-                    # Check base64 format (only alphanumeric, plus, slash, and optional equal padding)
-                    # and ensure it's not empty, is multiple of 4, and lacks regular space/punctuation
-                    if len(clean_body) > 0 and len(clean_body) % 4 == 0 and re.match(r'^[A-Za-z0-9+/]*={0,2}$', clean_body):
-                        is_base64 = True
-                
-                if is_base64:
-                    try:
-                        content = base64.b64decode(body)
-                        logger.info(f"JSON upload - Decoded {len(content)} bytes successfully from base64")
-                    except Exception as b64_err:
-                        logger.warning(f"JSON base64 decode failed, using raw body value: {b64_err}")
+                    logger.info(f"JSON upload - Keys received: {list(data.keys())}")
+                    
+                    # Extract filename, category, and source URL
+                    filename = request.headers.get('X-File-Name') or data.get('fileName') or data.get('filename') or filename
+                    body = data.get('$content') or data.get('content') or data.get('body') or ''
+
+                    # Check if body content is base64 encoded or a raw text string
+                    import base64
+                    import re
+                    
+                    is_base64 = False
+                    if isinstance(body, str):
+                        clean_body = re.sub(r'\s+', '', body)
+                        # Check base64 format (only alphanumeric, plus, slash, and optional equal padding)
+                        # and ensure it's not empty, is multiple of 4, and lacks regular space/punctuation
+                        if len(clean_body) > 0 and len(clean_body) % 4 == 0 and re.match(r'^[A-Za-z0-9+/]*={0,2}$', clean_body):
+                            is_base64 = True
+                    
+                    if is_base64:
+                        try:
+                            content = base64.b64decode(body)
+                            logger.info(f"JSON upload - Decoded {len(content)} bytes successfully from base64")
+                        except Exception as b64_err:
+                            logger.warning(f"JSON base64 decode failed, using raw body value: {b64_err}")
+                            content = body.encode('utf-8') if isinstance(body, str) else b''
+                    else:
+                        logger.info("JSON upload - Content is raw string, encoding to bytes")
                         content = body.encode('utf-8') if isinstance(body, str) else b''
                 else:
-                    logger.info("JSON upload - Content is raw string, encoding to bytes")
-                    content = body.encode('utf-8') if isinstance(body, str) else b''
-            else:
-                # 4. If not JSON, treat raw body as the file content
-                content = raw_body
-                filename = request.headers.get('X-File-Name', filename)
-                logger.info(f"Binary upload - Content length: {len(content)} bytes")
+                    # 4. If not JSON, treat raw body as the file content
+                    content = raw_body
+                    filename = request.headers.get('X-File-Name', filename)
+                    logger.info(f"Binary upload - Content length: {len(content)} bytes")
 
     except Exception as parse_err:
         logger.error(f"Upload parsing error: {parse_err}")
