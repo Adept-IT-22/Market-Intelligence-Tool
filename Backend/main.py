@@ -343,33 +343,80 @@ def upload_file():
             # 1. Get raw data first
             raw_body = request.get_data()
             
-            # 2. Try to parse as JSON regardless of Content-Type (Power Automate often sends mismatched headers)
+            # 2. Try to parse as JSON regardless of Content-Type
             is_valid_json = False
+            data = None
+            
+            # Try decoding to string first to check for JSON patterns
+            body_str = ""
             try:
-                # Only try parsing if it looks like JSON to avoid overhead/errors on large binaries
-                if raw_body and raw_body.strip().startswith(b'{'):
-                    import json
-                    data = json.loads(raw_body)
-                    is_valid_json = True
-                    
-                    logger.info(f"JSON upload - Keys received: {list(data.keys())}")
-                    filename = request.headers.get('X-File-Name', data.get('fileName', filename))
-                    body = data.get('$content', data.get('content', data.get('body', '')))
-                    
-                    # Decode base64 if present
-                    import base64
+                if raw_body:
+                    body_str = raw_body.decode('utf-8', errors='ignore').strip()
+            except Exception as decode_err:
+                logger.info(f"Failed to decode body string: {decode_err}")
+
+            if body_str:
+                # Remove common Windows/Microsoft BOM characters if present
+                if body_str.startswith('\ufeff'):
+                    body_str = body_str[1:]
+                
+                # Check for missing outer curly braces (common Power Automate anomaly e.g. "body": { ... })
+                if (body_str.startswith('"body"') or body_str.startswith('body')) and not body_str.startswith('{'):
+                    try_json = "{" + body_str + "}"
                     try:
-                        content = base64.b64decode(body) if body else b''
-                        logger.info(f"JSON upload - Decoded {len(content)} bytes successfully")
+                        import json
+                        data = json.loads(try_json)
+                        is_valid_json = True
+                        logger.info("JSON upload - Recovered malformed JSON missing outer braces successfully")
+                    except Exception as parse_err:
+                        logger.info(f"BOM/Brace wrapped JSON parsing failed: {parse_err}")
+
+                # If not already parsed and starts with '{', parse standard JSON
+                if not is_valid_json and body_str.startswith('{'):
+                    try:
+                        import json
+                        data = json.loads(body_str)
+                        is_valid_json = True
+                    except Exception as json_err:
+                        logger.info(f"Not valid JSON: {json_err}")
+
+            # 3. If successfully parsed as JSON, extract the content
+            if is_valid_json and isinstance(data, dict):
+                # If the outer dict has only "body" (due to recovery wrapping), unpack it
+                if len(data) == 1 and 'body' in data and isinstance(data['body'], dict):
+                    data = data['body']
+                    logger.info("JSON upload - Unpacked inner 'body' dict from wrapped JSON payload")
+
+                logger.info(f"JSON upload - Keys received: {list(data.keys())}")
+                
+                # Extract filename, category, and source URL
+                filename = request.headers.get('X-File-Name') or data.get('fileName') or data.get('filename') or filename
+                body = data.get('$content') or data.get('content') or data.get('body') or ''
+
+                # Check if body content is base64 encoded or a raw text string
+                import base64
+                import re
+                
+                is_base64 = False
+                if isinstance(body, str):
+                    clean_body = re.sub(r'\s+', '', body)
+                    # Check base64 format (only alphanumeric, plus, slash, and optional equal padding)
+                    # and ensure it's not empty, is multiple of 4, and lacks regular space/punctuation
+                    if len(clean_body) > 0 and len(clean_body) % 4 == 0 and re.match(r'^[A-Za-z0-9+/]*={0,2}$', clean_body):
+                        is_base64 = True
+                
+                if is_base64:
+                    try:
+                        content = base64.b64decode(body)
+                        logger.info(f"JSON upload - Decoded {len(content)} bytes successfully from base64")
                     except Exception as b64_err:
-                        # Fallback: maybe it's not base64 but raw string?
                         logger.warning(f"JSON base64 decode failed, using raw body value: {b64_err}")
                         content = body.encode('utf-8') if isinstance(body, str) else b''
-            except Exception as json_err:
-                logger.info(f"Not valid JSON (treating as binary): {json_err}")
-            
-            # 3. If not JSON, treat raw body as the file content
-            if not is_valid_json:
+                else:
+                    logger.info("JSON upload - Content is raw string, encoding to bytes")
+                    content = body.encode('utf-8') if isinstance(body, str) else b''
+            else:
+                # 4. If not JSON, treat raw body as the file content
                 content = raw_body
                 filename = request.headers.get('X-File-Name', filename)
                 logger.info(f"Binary upload - Content length: {len(content)} bytes")
