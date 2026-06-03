@@ -31,7 +31,7 @@ logger.setLevel(logging.INFO)
 # DO NOT hardcode Project IDs here. Ensure these are set in your .env file on Staging.
 PROJECT_ID = os.getenv("GCP_PROJECT_ID")
 REGION = os.getenv("GCP_REGION", "us-central1")
-GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
 
 if not PROJECT_ID:
     logger.error("!!! CRITICAL: GCP_PROJECT_ID is not set in environment. Gemini calls WILL fail with DNS errors. !!!")
