@@ -74,8 +74,9 @@ export class ReportStudioComponent implements OnInit {
   
   public get currentMonthYear(): string {
     const s = this.state();
-    if (s && s.sections && s.sections[0]) {
-      const fd = s.sections[0].formData || {};
+    const metadata = this.getSectionById(s, 'metadata');
+    if (metadata) {
+      const fd = metadata.formData || {};
       const dateVal = fd['period'] || fd['week_of'] || fd['report_date'];
       if (dateVal) {
         const d = new Date(dateVal);
@@ -89,16 +90,77 @@ export class ReportStudioComponent implements OnInit {
   public projectTitle = 'Strategic Market Intelligence';
 
   public reportTypes = [
-    { id: 'sprint', name: 'Sprint Report' },
-    { id: 'marketing', name: 'Marketing Report' },
-    { id: 'weekly', name: 'Weekly Report' },
-    { id: 'monthly', name: 'Monthly Report' }
+    { id: 'software_engineering', name: 'Software Engineering' },
+    { id: 'finance', name: 'Finance & Operations' },
+    { id: 'marketing', name: 'Marketing & Comms' },
+    { id: 'call_centre', name: 'Call Centre' },
+    { id: 'sales', name: 'Sales & Business Development' }
   ];
 
-  public selectedType = signal('sprint');
+  public selectedType = signal('software_engineering');
+  public editingSectionId = signal<string | null>(null);
+  public dismissedInsights = signal<string[]>([]);
+  public activeAccepts = signal<Record<string, boolean>>({});
+
+  dismissInsight(text: string, event?: Event) {
+    if (event) {
+      event.stopPropagation();
+    }
+    this.dismissedInsights.update(curr => [...curr, text]);
+  }
+
+  isDismissed(text: string): boolean {
+    return this.dismissedInsights().includes(text);
+  }
+
+  acceptSuggestion(targetId: string, text: string, event?: Event) {
+    if (event) {
+      event.stopPropagation();
+    }
+    const s = this.state();
+    const section = s?.sections.find(sec => sec.id === targetId);
+    if (section) {
+      const currentText = section.userOverride ?? section.aiDraft ?? '';
+      this.saveHistory(targetId, currentText);
+    }
+    this.activeAccepts.update(curr => ({ ...curr, [text]: true }));
+    this.reportService.applyAdvisorSuggestion(targetId, text)?.subscribe({
+      next: () => {
+        this.dismissInsight(text);
+        this.activeAccepts.update(curr => ({ ...curr, [text]: false }));
+      },
+      error: (err) => {
+        console.error('Failed to apply suggestion', err);
+        this.activeAccepts.update(curr => ({ ...curr, [text]: false }));
+      }
+    });
+  }
+
+  startEditingTitle(id: string) {
+    this.editingSectionId.set(id);
+    setTimeout(() => {
+      const el = document.querySelector('.title-edit-input, .step-title-input') as HTMLInputElement;
+      if (el) {
+        el.focus();
+        el.select();
+      }
+    }, 50);
+  }
+
+  saveTitle(id: string, event: any) {
+    const newTitle = event.target.value.trim();
+    if (newTitle && this.editingSectionId() === id) {
+      this.reportService.updateSectionTitle(id, newTitle);
+    }
+    this.editingSectionId.set(null);
+  }
+
+  cancelEditingTitle() {
+    this.editingSectionId.set(null);
+  }
 
   ngOnInit() {
-    this.loadSchema('sprint');
+    this.loadSchema('software_engineering');
     this.stateSub = this.reportService.state$.subscribe(s => this.state.set(s));
   }
   
@@ -112,48 +174,247 @@ export class ReportStudioComponent implements OnInit {
     const s = this.state();
     if (!s) return;
 
-    // 1. Metadata
-    this.onFormChange('metadata', 'project_name', 'Manuh Market Intelligence Platform');
-    this.onFormChange('metadata', 'report_by', 'Emmanuel Mwendia Maina');
-    this.onFormChange('metadata', 'sprint_no', 4);
-    this.onFormChange('metadata', 'period', new Date('2026-04-22'));
-    this.onFormChange('metadata', 'sprint_goal', 'Deliver a functional Market Intelligence MVP module with:\n- Completed frontend dashboard views\n- Integrated report generation (Report Studio)\n- Initial data pipeline validation');
-    this.onFormChange('metadata', 'sprint_scope', 'This sprint focused on transitioning Manuh from UI completion → functional analytics system.\n\nIncluded:\n- Dashboard UI finalization\n- Report Studio implementation\n- Basic data flow integration (mock/live hybrid)\n\nExcluded:\n- Advanced analytics models\n- Full production deployment\n- External API integrations');
+    if (s.type === 'software_engineering') {
+      const sprintGoal = 'Deliver a functional Market Intelligence MVP module with:\n- Completed frontend dashboard views\n- Integrated report generation (Report Studio)\n- Initial data pipeline validation';
+      const sprintScope = 'This sprint focused on transitioning Manuh from UI completion → functional analytics system.\n\nIncluded:\n- Dashboard UI finalization\n- Report Studio implementation\n- Basic data flow integration (mock/live hybrid)\n\nExcluded:\n- Advanced analytics models\n- Full production deployment\n- External API integrations';
+      const introText = 'Core system components were successfully built and integrated. However, deployment and full system validation remain incomplete, pushing critical tasks into the next sprint. The team is focusing on stabilization and environment readiness.';
+      const statusRating = 'Delayed';
+      const statusSummary = 'We are currently in a **Delayed** state due to environment provisioning bottlenecks. While technical development is 90% complete, the integration validation phase requires a stable production-like environment which is pending approval.';
+      const timeline = 'April 8 – April 22, 2026';
+      const timeSpent = '167 hours';
+      const tasksCompleted = '- **Analytics Dashboard:** Completed all UI components and partial data binding.\n- **Report Studio:** End-to-end workflow implemented (create, preview, export).\n- **API Integration:** Core frontend-backend communication endpoints are operational.';
+      const futureTasks = '- **Server Deployment:** Critical task pushed to next sprint.\n- **Advanced Models:** Integration of predictive analytics.\n- **External APIs:** Finalizing third-party data connectors.';
+      const qaMetrics = '- **Test Coverage:** 84% unit test coverage achieved.\n- **Bugs Identified:** 12 minor UI glitches found (fixed).\n- **Performance:** Average response time < 200ms for core dashboards.';
+      const testResults = '- Unit tests completed successfully\n- Integration tests passing';
+      const issueList = '- **Deployment:** Awaiting production environment provisioning.\n- **Validation:** Full end-to-end system testing delayed by 2 days.';
+      const pendingApprovals = '- **Production Environment:** Critical sign-off needed by end of week.\n- **Security Audit:** Initial findings require remediation before live deployment.\n- **User Acceptance:** Scheduled for the first week of May.';
 
-    // 2. Intro
-    this.onFormChange('intro', 'executive_summary', 'Core system components were successfully built and integrated. However, deployment and full system validation remain incomplete, pushing critical tasks into the next sprint.');
+      // Metadata
+      this.onFormChange('metadata', 'project_name', 'Manuh Market Intelligence Platform');
+      this.onFormChange('metadata', 'report_by', 'Emmanuel Mwendia Maina');
+      this.onFormChange('metadata', 'sprint_no', 4);
+      this.onFormChange('metadata', 'period', new Date('2026-04-22'));
+      this.onFormChange('metadata', 'sprint_goal', sprintGoal);
+      this.onFormChange('metadata', 'sprint_scope', sprintScope);
 
-    // 3. Status
-    this.onFormChange('status', 'status_rating', 'Delayed');
-    this.onFormChange('status', 'summary_text', 'Core system components were successfully built and integrated. However, deployment and full system validation remain incomplete, pushing critical tasks into the next sprint.');
-    this.onFormChange('status', 'timeline', 'April 8 – April 22, 2026');
-    this.onFormChange('status', 'time_spent', '167 hours');
+      // Form inputs
+      this.onFormChange('intro', 'executive_summary', introText);
+      this.onFormChange('status', 'status_rating', statusRating);
+      this.onFormChange('status', 'summary_text', statusSummary);
+      this.onFormChange('status', 'timeline', timeline);
+      this.onFormChange('status', 'time_spent', timeSpent);
+      this.onFormChange('progress_detail', 'tasks_completed', tasksCompleted);
+      this.onFormChange('next_sprint', 'future_tasks', futureTasks);
+      this.onFormChange('qa', 'qa_metrics', qaMetrics);
+      this.onFormChange('qa', 'test_results', testResults);
+      this.onFormChange('issues', 'issue_list', issueList);
+      this.onFormChange('next_steps', 'pending_approvals', pendingApprovals);
 
-    // 4. Progress
-    this.onFormChange('progress_detail', 'tasks_completed', '✅ Analytics Dashboard (UI + partial data binding)\n✅ Report Studio (create, preview, export reports)\n✅ Frontend–Backend communication (core endpoints working)');
+      // Section Drafts
+      this.reportService.updateSectionDraft('intro', '#### Executive Summary\n' + introText);
+      this.reportService.updateSectionDraft('status', '#### Overall Status Summary\n' + statusSummary);
+      this.reportService.updateSectionDraft('progress_detail', '#### Key Accomplishments\n' + tasksCompleted);
+      this.reportService.updateSectionDraft('next_sprint', '#### Upcoming Priorities\n' + futureTasks);
+      this.reportService.updateSectionDraft('qa', '#### QA Metrics & Findings\n' + qaMetrics + '\n\n' + testResults);
+      this.reportService.updateSectionDraft('issues', '#### Current Blockers\n' + issueList);
+      this.reportService.updateSectionDraft('next_steps', '#### Required Approvals\n' + pendingApprovals);
 
-    // 5. Next Sprint
-    this.onFormChange('next_sprint', 'future_tasks', '⏳ Server deployment\n- Advanced analytics models\n- External API integrations');
+    } else if (s.type === 'marketing') {
+      const channels = '- LinkedIn Sponsored Content\n- Google Search Ads (Targeted)\n- Tech Industry Partner Newsletters\n- Organic SEO and Blogs';
+      const messaging = 'Focus on time savings (60% reduction in reporting time) and business intelligence capabilities.';
+      const kpis = 'Goal: Increase inbound qualified leads by 20% in Q2.';
+      const budget = '$45,000';
+      const leads = 1250;
+      const conversionRate = '3.4%';
+      const campaignsSummary = 'LinkedIn Ads campaign outperformed benchmarks, generating 800+ leads at a lower cost-per-lead (CPL) than previous quarters. Newsletter placements drove high quality enterprise trials.';
 
-    // 6. Issues
-    this.onFormChange('issues', 'issue_list', 'Deployment and full system validation remain incomplete, pushing critical tasks into the next sprint.\nMissing production SSL certificates.\nPending third-party security audit.');
+      // Metadata
+      this.onFormChange('metadata', 'campaign_name', 'Q2 Growth Campaign');
+      this.onFormChange('metadata', 'report_by', 'Sarah Jenkins (Marketing Director)');
+      this.onFormChange('metadata', 'period', 'April 1 – June 30, 2026');
+      this.onFormChange('metadata', 'target_audience', 'Enterprise Tech Leaders & Decision Makers');
 
-    // 7. Approvals
-    this.onFormChange('next_steps', 'pending_approvals', 'Server deployment authorization\nFinal usability validation approval\nProduction environment access');
+      // Form inputs
+      this.onFormChange('strategy', 'channels', channels);
+      this.onFormChange('strategy', 'messaging', messaging);
+      this.onFormChange('performance', 'kpis', kpis);
+      this.onFormChange('performance', 'budget', budget);
+      this.onFormChange('performance', 'leads', leads);
+      this.onFormChange('performance', 'conversion_rate', conversionRate);
+      this.onFormChange('performance', 'campaigns_summary', campaignsSummary);
+
+      // Section Drafts
+      this.reportService.updateSectionDraft('strategy', '#### Marketing Strategy\n- **Channels Used:**\n' + channels + '\n- **Core Messaging:**\n' + messaging);
+      this.reportService.updateSectionDraft('performance', '#### Execution & Performance\n- **KPIs:** ' + kpis + '\n- **Budget Spent:** ' + budget + '\n- **Leads Generated:** ' + leads + '\n- **Conversion Rate:** ' + conversionRate + '\n- **Campaigns Summary:**\n' + campaignsSummary);
+
+    } else if (s.type === 'finance') {
+      const revenue = '$182,500';
+      const expenses = '$124,000';
+      const cashFlow = 'Highly positive cash flow (+58,500 net surplus) driven by corporate renewals and successful expansion deals.';
+      const opsHighlights = '✅ Migrated customer billing system to automated invoicing\n✅ Reduced office overhead costs by 8%\n✅ Finalized third-party vendor audits';
+      const resourceUtil = 'Engineering and consulting teams are at 92% utilization rate. Core resources are allocated to MVP launch.';
+      const costOutliers = '- Server hosting costs (+14% above projection)\n- Audit consulting fees (one-off expense)';
+      const mitigations = 'Applying auto-scaling rules on Qdrant and GPU servers during off-peak hours to reduce monthly hosting costs by 10%.';
+
+      // Metadata
+      this.onFormChange('metadata', 'department', 'Finance & Operations');
+      this.onFormChange('metadata', 'report_by', 'David Kimani (CFO)');
+      this.onFormChange('metadata', 'period', 'May 2026');
+
+      // Form inputs
+      this.onFormChange('financial_status', 'revenue', revenue);
+      this.onFormChange('financial_status', 'expenses', expenses);
+      this.onFormChange('financial_status', 'cash_flow', cashFlow);
+      this.onFormChange('operations', 'ops_highlights', opsHighlights);
+      this.onFormChange('operations', 'resource_util', resourceUtil);
+      this.onFormChange('risks', 'cost_outliers', costOutliers);
+      this.onFormChange('risks', 'mitigations', mitigations);
+
+      // Section Drafts
+      this.reportService.updateSectionDraft('financial_status', '#### Financial Health\n- **Revenue:** ' + revenue + '\n- **Expenses:** ' + expenses + '\n- **Cash Flow Summary:**\n' + cashFlow);
+      this.reportService.updateSectionDraft('operations', '#### Operational Efficiency\n- **Highlights:**\n' + opsHighlights + '\n- **Resource Utilization:**\n' + resourceUtil);
+      this.reportService.updateSectionDraft('risks', '#### Financial Risks & Cost Control\n- **Outliers:**\n' + costOutliers + '\n- **Mitigations:**\n' + mitigations);
+
+    } else if (s.type === 'call_centre') {
+      const totalCalls = 14820;
+      const slaPercentage = '94.2% (Target: 95.0%)';
+      const aht = '3m 45s';
+      const abandonmentRate = '2.1%';
+      const csat = '4.6 / 5.0';
+      const topAgents = '- Mercy W.\n- John D.\n- Peter K.';
+      const qaScore = '91.5%';
+      const peakTimes = '10:00 AM – 12:30 PM, 2:00 PM – 4:30 PM (Mon-Wed)';
+      const complaints = '- Portal login loading times\n- Invoicing statement clarity\n- Feature request questions';
+      const downtime = '12 minutes total downtime scheduled for database security patching.';
+
+      // Metadata
+      this.onFormChange('metadata', 'queue_name', 'Customer Care Tier-1');
+      this.onFormChange('metadata', 'report_by', 'Angela Mutua (Call Centre Manager)');
+      this.onFormChange('metadata', 'period', 'May 2026');
+
+      // Form inputs
+      this.onFormChange('call_metrics', 'total_calls', totalCalls);
+      this.onFormChange('call_metrics', 'sla_percentage', slaPercentage);
+      this.onFormChange('call_metrics', 'aht', aht);
+      this.onFormChange('call_metrics', 'abandonment_rate', abandonmentRate);
+      this.onFormChange('agent_performance', 'csat', csat);
+      this.onFormChange('agent_performance', 'top_agents', topAgents);
+      this.onFormChange('agent_performance', 'qa_score', qaScore);
+      this.onFormChange('call_trends', 'peak_times', peakTimes);
+      this.onFormChange('call_trends', 'complaints', complaints);
+      this.onFormChange('call_trends', 'downtime', downtime);
+
+      // Section Drafts
+      this.reportService.updateSectionDraft('call_metrics', '#### Call Performance\n- **Total Calls:** ' + totalCalls + '\n- **SLA Achieved:** ' + slaPercentage + '\n- **Average Handle Time:** ' + aht + '\n- **Abandonment Rate:** ' + abandonmentRate);
+      this.reportService.updateSectionDraft('agent_performance', '#### Agent & CSAT Details\n- **CSAT Score:** ' + csat + '\n- **Top Performing Agents:**\n' + topAgents + '\n- **QA Score Average:** ' + qaScore);
+      this.reportService.updateSectionDraft('call_trends', '#### Call Volume Trends & Core Issues\n- **Peak Volumes/Times:** ' + peakTimes + '\n- **Common Customer Issues:**\n' + complaints + '\n- **System Downtime Details:**\n' + downtime);
+
+    } else if (s.type === 'sales') {
+      const newLeads = 145;
+      const pipelineDeals = '- Safaricom Expansion\n- KCB Group Core Contract\n- Equity Bank Pilot Engagement';
+      const pipelineVal = '$320,000';
+      const closedRev = '$115,000';
+      const keyWon = '- KCB Group Core Contract ($85K)\n- Safaricom Pilot Phase ($30K)';
+      const conversionRate = '18.5%';
+      const competitors = 'Oracle Cloud and local custom software consulting agencies.';
+      const salesHurdles = '- Extended procurement cycles in corporate banking\n- Complex IT security reviews';
+      const stalledDealsNext = 'Scheduling technical architecture walkthroughs directly with banking CISO teams to accelerate compliance approvals.';
+
+      // Metadata
+      this.onFormChange('metadata', 'territory', 'East Africa Enterprise Accounts');
+      this.onFormChange('metadata', 'report_by', 'Ken Mwangi (Head of Business Development)');
+      this.onFormChange('metadata', 'period', 'May 2026');
+
+      // Form inputs
+      this.onFormChange('pipeline', 'new_leads', newLeads);
+      this.onFormChange('pipeline', 'pipeline_deals', pipelineDeals);
+      this.onFormChange('pipeline', 'pipeline_val', pipelineVal);
+      this.onFormChange('closed_deals', 'closed_rev', closedRev);
+      this.onFormChange('closed_deals', 'key_won', keyWon);
+      this.onFormChange('closed_deals', 'conversion_rate', conversionRate);
+      this.onFormChange('strategy_challenges', 'competitors', competitors);
+      this.onFormChange('strategy_challenges', 'sales_hurdles', salesHurdles);
+      this.onFormChange('strategy_challenges', 'stalled_deals_next', stalledDealsNext);
+
+      // Section Drafts
+      this.reportService.updateSectionDraft('pipeline', '#### Sales Pipeline Status\n- **New Leads Qualified:** ' + newLeads + '\n- **Deals in Pipeline:**\n' + pipelineDeals + '\n- **Pipeline Value:** ' + pipelineVal);
+      this.reportService.updateSectionDraft('closed_deals', '#### Closed Revenue & Conversions\n- **Revenue Closed:** ' + closedRev + '\n- **Key Accounts Won:**\n' + keyWon + '\n- **Sales Conversion Rate:** ' + conversionRate);
+      this.reportService.updateSectionDraft('strategy_challenges', '#### BD Strategy & Market Challenges\n- **Competitor Insights:** ' + competitors + '\n- **Current Sales Hurdles:**\n' + salesHurdles + '\n- **Next Steps for Stalled Deals:**\n' + stalledDealsNext);
+    }
+    this.reportService.analyzeReport();
+  }
+
+  clearDemoData() {
+    const s = this.state();
+    if (!s) return;
     
-    this.reportService.updateSectionDraft('intro', '#### Executive Summary\nCore system components were successfully built and integrated. However, deployment and full system validation remain incomplete, pushing critical tasks into the next sprint. The team is focusing on stabilization and environment readiness.');
-
-    this.reportService.updateSectionDraft('status', '#### Overall Status Summary\nWe are currently in a **Delayed** state due to environment provisioning bottlenecks. While technical development is 90% complete, the integration validation phase requires a stable production-like environment which is pending approval.');
-
-    this.reportService.updateSectionDraft('next_steps', '#### Required Approvals\n- **Production Environment:** Critical sign-off needed by end of week.\n- **Security Audit:** Initial findings require remediation before live deployment.\n- **User Acceptance:** Scheduled for the first week of May.');
-
-    this.reportService.updateSectionDraft('progress_detail', '#### Key Accomplishments\n- **Analytics Dashboard:** Completed all UI components and partial data binding.\n- **Report Studio:** End-to-end workflow implemented (create, preview, export).\n- **API Integration:** Core frontend-backend communication endpoints are operational.');
+    const type = s.type;
+    const title = this.reportTypes.find(t => t.id === type)?.name || 'New Report';
+    const schema = this.sectionSchema();
     
-    this.reportService.updateSectionDraft('next_sprint', '#### Upcoming Priorities\n- **Server Deployment:** Critical task pushed to next sprint.\n- **Advanced Models:** Integration of predictive analytics.\n- **External APIs:** Finalizing third-party data connectors.');
+    // Reset report state
+    this.reportService.initReport(type, title, schema);
     
-    this.reportService.updateSectionDraft('qa', '#### QA Metrics & Findings\n- **Test Coverage:** 84% unit test coverage achieved.\n- **Bugs Identified:** 12 minor UI glitches found (fixed).\n- **Performance:** Average response time < 200ms for core dashboards.');
-    
-    this.reportService.updateSectionDraft('issues', '#### Current Blockers\n- **Deployment:** Awaiting production environment provisioning.\n- **Validation:** Full end-to-end system testing delayed by 2 days.');
+    // Clear advisor state in component
+    this.dismissedInsights.set([]);
+    this.activeAccepts.set({});
+    this.draftHistory.clear();
+  }
+
+  // History tracking for undo/redo
+  private draftHistory = new Map<string, { past: string[]; future: string[] }>();
+
+  private getHistory(sectionId: string) {
+    if (!this.draftHistory.has(sectionId)) {
+      this.draftHistory.set(sectionId, { past: [], future: [] });
+    }
+    return this.draftHistory.get(sectionId)!;
+  }
+
+  saveHistory(sectionId: string, currentText: string) {
+    const history = this.getHistory(sectionId);
+    history.past.push(currentText);
+    history.future = []; // Clear redo stack on new change
+  }
+
+  canUndo(sectionId: string): boolean {
+    const history = this.draftHistory.get(sectionId);
+    return !!(history && history.past.length > 0);
+  }
+
+  canRedo(sectionId: string): boolean {
+    const history = this.draftHistory.get(sectionId);
+    return !!(history && history.future.length > 0);
+  }
+
+  undo(sectionId: string) {
+    const history = this.draftHistory.get(sectionId);
+    if (!history || history.past.length === 0) return;
+
+    const s = this.state();
+    const section = s?.sections.find(sec => sec.id === sectionId);
+    if (!section) return;
+
+    const currentText = section.userOverride ?? section.aiDraft ?? '';
+    const previousText = history.past.pop()!;
+    history.future.push(currentText);
+
+    this.reportService.updateUserOverride(sectionId, previousText);
+  }
+
+  redo(sectionId: string) {
+    const history = this.draftHistory.get(sectionId);
+    if (!history || history.future.length === 0) return;
+
+    const s = this.state();
+    const section = s?.sections.find(sec => sec.id === sectionId);
+    if (!section) return;
+
+    const currentText = section.userOverride ?? section.aiDraft ?? '';
+    const nextText = history.future.pop()!;
+    history.past.push(currentText);
+
+    this.reportService.updateUserOverride(sectionId, nextText);
   }
 
   loadSchema(type: string) {
@@ -211,6 +472,12 @@ export class ReportStudioComponent implements OnInit {
   }
 
   refine(sectionId: string, action: string) {
+    const s = this.state();
+    const section = s?.sections.find(sec => sec.id === sectionId);
+    if (section) {
+      const currentText = section.userOverride ?? section.aiDraft ?? '';
+      this.saveHistory(sectionId, currentText);
+    }
     this.reportService.refineSection(sectionId, action)?.subscribe();
   }
 
@@ -241,7 +508,15 @@ export class ReportStudioComponent implements OnInit {
 
   onTextEdit(sectionId: string, event: any) {
     const text = event.target.innerText;
-    this.reportService.updateUserOverride(sectionId, text);
+    const s = this.state();
+    const section = s?.sections.find(sec => sec.id === sectionId);
+    if (section) {
+      const currentText = section.userOverride ?? section.aiDraft ?? '';
+      if (currentText !== text) {
+        this.saveHistory(sectionId, currentText);
+        this.reportService.updateUserOverride(sectionId, text);
+      }
+    }
   }
 
   /**
@@ -395,10 +670,16 @@ export class ReportStudioComponent implements OnInit {
     }
   }
 
+  getSectionById(s: ReportState | null, id: string): SectionState | null {
+    if (!s || !s.sections) return null;
+    return s.sections.find(sec => sec.id === id) || null;
+  }
+
   getDisplayTitle(s: ReportState | null): string {
-    if (!s || !s.sections || !s.sections[0]) return '';
-    const formData = s.sections[0].formData || {};
-    let title = formData['project_name'] || formData['campaign_name'] || s.title || '';
+    const metadata = this.getSectionById(s, 'metadata');
+    if (!metadata) return '';
+    const formData = metadata.formData || {};
+    let title = formData['project_name'] || formData['campaign_name'] || s?.title || '';
     
     // If title is an object, extract a string property
     if (typeof title === 'object' && title !== null) {
@@ -409,13 +690,14 @@ export class ReportStudioComponent implements OnInit {
   }
 
   getMetadata(s: ReportState | null) {
-    if (!s || !s.sections || !s.sections[0]) return null;
-    const formData = s.sections[0].formData || {};
+    const metadata = this.getSectionById(s, 'metadata');
+    if (!metadata) return null;
+    const formData = metadata.formData || {};
     return {
       project: formData['project_name'] || 'Market Intelligence',
       preparedBy: formData['prepared_by'] || 'Adept Studio',
       date: formData['reporting_date'] || this.currentMonthYear,
-      type: this.reportTypes.find(t => t.id === s.type)?.name || 'Strategic Report'
+      type: this.reportTypes.find(t => t.id === s?.type)?.name || 'Strategic Report'
     };
   }
 
@@ -478,6 +760,18 @@ export class ReportStudioComponent implements OnInit {
     return !!this.getSectionContent(section).trim();
   }
 
+  getSummaryHighlights(s: ReportState | null): string[] {
+    if (!s || !s.sections) return [];
+    const progress = s.sections.find(sec => sec.id === 'progress_detail');
+    if (!progress?.formData?.['tasks_completed']) return [];
+    
+    return String(progress.formData['tasks_completed'])
+      .split('\n')
+      .filter(t => t.trim())
+      .map(t => t.replace(/^[•\-\*\. \d–—✅]+\s*/, '').trim())
+      .slice(0, 4);
+  }
+
   getAggregatedWhatNext(s: ReportState | null): string[] {
     if (!s || !s.sections) return [];
     
@@ -515,21 +809,10 @@ export class ReportStudioComponent implements OnInit {
     return combined.slice(0, 5); 
   }
 
-  getSummaryHighlights(s: ReportState | null): string[] {
-    if (!s || !s.sections) return [];
-    const progress = s.sections.find(sec => sec.id === 'progress_detail');
-    if (!progress?.formData?.['tasks_completed']) return [];
-    
-    return String(progress.formData['tasks_completed'])
-      .split('\n')
-      .filter(t => t.trim())
-      .map(t => t.replace(/^[•\-\*\. \d–—✅]+\s*/, '').trim())
-      .slice(0, 4);
-  }
-
   getSplitIntro(s: ReportState | null, part: 1 | 2): string {
-    if (!s || !s.sections || !s.sections[1]) return '';
-    const text = s.sections[1].userOverride ?? s.sections[1].aiDraft ?? '';
+    const intro = this.getSectionById(s, 'intro');
+    if (!intro) return '';
+    const text = intro.userOverride ?? intro.aiDraft ?? '';
     
     // Heuristic: ~2500 chars fit Page 3 (with the summary boxes)
     const splitPoint = 2200; 
@@ -550,9 +833,7 @@ export class ReportStudioComponent implements OnInit {
   }
 
   shouldSplitIntro(s: ReportState | null): boolean {
-    if (!s || !s.sections || !s.sections[1]) return false;
-    const text = s.sections[1].userOverride ?? s.sections[1].aiDraft ?? '';
-    return text.length > 2200;
+    return this.getSplitIntro(s, 2).trim().length > 0;
   }
 
   shouldBreakOverallStatus(s: ReportState | null): boolean {
@@ -562,32 +843,31 @@ export class ReportStudioComponent implements OnInit {
     if (this.shouldSplitIntro(s)) return true;
 
     // Check the Intro content length (both form data and AI draft)
-    const introLen = Math.max(
-      (s.sections[1]?.formData?.['executive_summary'] || '').length,
-      (s.sections[1]?.userOverride ?? s.sections[1]?.aiDraft ?? '').length
-    );
+    const intro = this.getSectionById(s, 'intro');
+    const introLen = intro ? Math.max(
+      (intro.formData?.['executive_summary'] || '').length,
+      (intro.userOverride ?? intro.aiDraft ?? '').length
+    ) : 0;
 
     // Check the Status content length
-    const statusLen = Math.max(
-      (s.sections[2]?.formData?.['summary_text'] || '').length,
-      (s.sections[2]?.userOverride ?? s.sections[2]?.aiDraft ?? '').length
-    );
+    const status = this.getSectionById(s, 'status');
+    const statusLen = status ? Math.max(
+      (status.formData?.['summary_text'] || '').length,
+      (status.userOverride ?? status.aiDraft ?? '').length
+    ) : 0;
     
     // If combined visible content is substantial, break to new page
     return (introLen + statusLen) > 300; // Increased threshold for AI drafts
   }
 
   shouldBreakIssues(s: ReportState | null): boolean {
-    if (!s || !s.sections || !s.sections[6]) return false;
-    const section = s.sections[6];
-    const text = section.userOverride ?? section.aiDraft ?? '';
-    // Only break if content is long AND contains the split marker
-    return text.length > 1400 && text.includes('Next Steps'); 
+    return this.getSplitIssues(s, 2).trim().length > 0;
   }
 
   getSplitIssues(s: ReportState | null, part: 1 | 2): string {
-    if (!s || !s.sections || !s.sections[6]) return '';
-    const text = s.sections[6].userOverride ?? s.sections[6].aiDraft ?? '';
+    const issues = this.getSectionById(s, 'issues');
+    if (!issues) return '';
+    const text = issues.userOverride ?? issues.aiDraft ?? '';
     
     // Find the "Next Steps" or similar header to split at
     const splitTerm = 'Next Steps';
@@ -627,10 +907,15 @@ export class ReportStudioComponent implements OnInit {
     }
   }
 
+  hasVisibleInsights(items: any[] | undefined): boolean {
+    if (!items) return false;
+    return items.some(item => !this.isDismissed(item.text));
+  }
+
   hasAnalysis(s: ReportState | null): boolean {
     if (!s || !s.analysis) return false;
-    return (s.analysis.risks?.length > 0 ||
-      s.analysis.inconsistencies?.length > 0 ||
-      s.analysis.suggestions?.length > 0);
+    return this.hasVisibleInsights(s.analysis.risks) ||
+      this.hasVisibleInsights(s.analysis.inconsistencies) ||
+      this.hasVisibleInsights(s.analysis.suggestions);
   }
 }

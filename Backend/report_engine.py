@@ -31,8 +31,8 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
 
 # --- Report Type Abstraction ---
 REPORT_TYPES = {
-    "sprint": {
-        "title": "Sprint Review Report",
+    "software_engineering": {
+        "title": "Software Engineering Progress Report",
         "sections": [
             {
                 "id": "metadata",
@@ -107,7 +107,7 @@ REPORT_TYPES = {
                 "retrieval_query": "adept governance approval process"
             }
         ],
-        "docx_template": "report_templates/sprint_report.docx",
+        "docx_template": "report_templates/software_engineering_report.docx",
         "transformations": {
             "make_executive": "Rewrite this section for an executive audience.",
             "clarify": "Improve the clarity and flow.",
@@ -115,7 +115,7 @@ REPORT_TYPES = {
         }
     },
     "marketing": {
-        "title": "Marketing Performance Report",
+        "title": "Marketing & Comms Performance Report",
         "sections": [
             {
                 "id": "metadata",
@@ -128,10 +128,23 @@ REPORT_TYPES = {
                 ]
             },
             {
+                "id": "strategy",
+                "title": "Marketing Strategy",
+                "questions": [
+                    {"id": "channels", "label": "Key Channels Used", "type": "list"},
+                    {"id": "messaging", "label": "Core Marketing Message", "type": "textarea"}
+                ],
+                "retrieval_query": "marketing campaign communication strategy standards"
+            },
+            {
                 "id": "performance",
                 "title": "Execution & Performance",
                 "questions": [
-                    {"id": "kpis", "label": "Key Performance Metrics", "type": "textarea"}
+                    {"id": "kpis", "label": "Key Performance Metrics", "type": "textarea"},
+                    {"id": "budget", "label": "Budget Spent", "type": "text"},
+                    {"id": "leads", "label": "Leads Generated", "type": "number"},
+                    {"id": "conversion_rate", "label": "Conversion Rate", "type": "text"},
+                    {"id": "campaigns_summary", "label": "Summary of Campaigns", "type": "textarea"}
                 ],
                 "retrieval_query": "marketing performance reporting standards campaign metrics"
             }
@@ -143,61 +156,157 @@ REPORT_TYPES = {
             "shorten": "Condense this performance report significantly."
         }
     },
-    "weekly": {
-        "title": "Weekly Activity Report",
+    "finance": {
+        "title": "Finance & Operations Report",
         "sections": [
             {
                 "id": "metadata",
-                "title": "Metadata",
+                "title": "Document Information",
                 "questions": [
-                    {"id": "week_of", "label": "Week Starting", "type": "date"},
-                    {"id": "team_lead", "label": "Team Lead", "type": "text"}
+                    {"id": "department", "label": "Department/Unit", "type": "text"},
+                    {"id": "report_by", "label": "Prepared By", "type": "text"},
+                    {"id": "period", "label": "Reporting Period", "type": "text"}
                 ]
             },
             {
-                "id": "activities",
-                "title": "Weekly Highlights",
+                "id": "financial_status",
+                "title": "Financial Health",
                 "questions": [
-                    {"id": "highlights", "label": "Major Wins", "type": "textarea"}
+                    {"id": "revenue", "label": "Revenue/Inflow", "type": "text"},
+                    {"id": "expenses", "label": "Operational Expenses", "type": "text"},
+                    {"id": "cash_flow", "label": "Cash Flow Summary", "type": "textarea"}
                 ],
-                "retrieval_query": "weekly reporting cadence highlights wins"
+                "retrieval_query": "adept financial status reporting cost management"
+            },
+            {
+                "id": "operations",
+                "title": "Operational Efficiency",
+                "questions": [
+                    {"id": "ops_highlights", "label": "Operational Highlights", "type": "list"},
+                    {"id": "resource_util", "label": "Resource Utilization", "type": "textarea"}
+                ],
+                "retrieval_query": "operations reporting metrics efficiency resources"
+            },
+            {
+                "id": "risks",
+                "title": "Financial Risks & Cost Control",
+                "questions": [
+                    {"id": "cost_outliers", "label": "Cost Outliers", "type": "list"},
+                    {"id": "mitigations", "label": "Risk Mitigations", "type": "textarea"}
+                ],
+                "retrieval_query": "financial risks cost control mitigation strategy"
             }
         ],
-        "docx_template": "report_templates/weekly_report.docx",
+        "docx_template": "report_templates/finance_report.docx",
         "transformations": {
-            "make_executive": "Rewrite this weekly highlights section for an executive audience.",
-            "clarify": "Improve the clarity of these weekly activities.",
-            "shorten": "Condense the weekly wins significantly."
+            "make_executive": "Rewrite this section for an executive audience focusing on financial impact.",
+            "clarify": "Improve the clarity of financial and operational details.",
+            "shorten": "Condense the financial findings significantly."
         }
     },
-    "monthly": {
-        "title": "Monthly Strategic Overview",
+    "call_centre": {
+        "title": "Call Centre Performance Report",
         "sections": [
             {
                 "id": "metadata",
-                "title": "Metadata",
+                "title": "Document Information",
                 "questions": [
-                    {"id": "month_year", "label": "Month & Year", "type": "text"},
-                    {"id": "author", "label": "Report Author", "type": "text"}
+                    {"id": "queue_name", "label": "Queue/Campaign Name", "type": "text"},
+                    {"id": "report_by", "label": "Prepared By", "type": "text"},
+                    {"id": "period", "label": "Reporting Period", "type": "text"}
                 ]
             },
             {
-                "id": "strategy",
-                "title": "Strategic Gains",
+                "id": "call_metrics",
+                "title": "Call Performance",
                 "questions": [
-                    {"id": "gains", "label": "Monthly Progress", "type": "textarea"}
+                    {"id": "total_calls", "label": "Total Calls Handled", "type": "number"},
+                    {"id": "sla_percentage", "label": "SLA Achieved (%)", "type": "text"},
+                    {"id": "aht", "label": "Average Handle Time (AHT)", "type": "text"},
+                    {"id": "abandonment_rate", "label": "Abandonment Rate", "type": "text"}
                 ],
-                "retrieval_query": "monthly strategic report template gains strategy"
+                "retrieval_query": "call centre performance metrics average handle time SLA"
+            },
+            {
+                "id": "agent_performance",
+                "title": "Agent & CSAT Details",
+                "questions": [
+                    {"id": "csat", "label": "CSAT Score", "type": "text"},
+                    {"id": "top_agents", "label": "Top Performing Agents", "type": "list"},
+                    {"id": "qa_score", "label": "QA Score Average", "type": "text"}
+                ],
+                "retrieval_query": "call centre agent performance customer satisfaction quality assurance"
+            },
+            {
+                "id": "call_trends",
+                "title": "Trends & Core Issues",
+                "questions": [
+                    {"id": "peak_times", "label": "Peak Call Volumes/Times", "type": "text"},
+                    {"id": "complaints", "label": "Common Customer Issues", "type": "list"},
+                    {"id": "downtime", "label": "System Downtime Details", "type": "text"}
+                ],
+                "retrieval_query": "call centre volume trends customer issues system stability"
             }
         ],
-        "docx_template": "report_templates/monthly_report.docx",
+        "docx_template": "report_templates/call_centre_report.docx",
         "transformations": {
-            "make_executive": "Rewrite this strategic overview for an executive audience, focusing on impact.",
-            "clarify": "Improve the clarity and flow of these strategic gains.",
-            "shorten": "Condense this monthly strategic summary significantly."
+            "make_executive": "Rewrite this call centre summary for an executive review.",
+            "clarify": "Improve clarity of call trends and SLA compliance.",
+            "shorten": "Condense call metrics details."
+        }
+    },
+    "sales": {
+        "title": "Sales & Business Development Report",
+        "sections": [
+            {
+                "id": "metadata",
+                "title": "Document Information",
+                "questions": [
+                    {"id": "territory", "label": "Territory/Market Focus", "type": "text"},
+                    {"id": "report_by", "label": "Prepared By", "type": "text"},
+                    {"id": "period", "label": "Reporting Period", "type": "text"}
+                ]
+            },
+            {
+                "id": "pipeline",
+                "title": "Sales Pipeline Status",
+                "questions": [
+                    {"id": "new_leads", "label": "New Leads Qualified", "type": "number"},
+                    {"id": "pipeline_deals", "label": "Deals in Pipeline", "type": "list"},
+                    {"id": "pipeline_val", "label": "Pipeline Value", "type": "text"}
+                ],
+                "retrieval_query": "sales pipeline deal tracking lead conversion"
+            },
+            {
+                "id": "closed_deals",
+                "title": "Closed-Won & Revenue",
+                "questions": [
+                    {"id": "closed_rev", "label": "Revenue Closed", "type": "text"},
+                    {"id": "key_won", "label": "Key Accounts Won", "type": "list"},
+                    {"id": "conversion_rate", "label": "Sales Conversion Rate", "type": "text"}
+                ],
+                "retrieval_query": "sales closed deals revenue recognition customer win case"
+            },
+            {
+                "id": "strategy_challenges",
+                "title": "Strategy & Obstacles",
+                "questions": [
+                    {"id": "competitors", "label": "Competitor Insights", "type": "textarea"},
+                    {"id": "sales_hurdles", "label": "Current Sales Hurdles", "type": "list"},
+                    {"id": "stalled_deals_next", "label": "Next Steps for Stalled Deals", "type": "textarea"}
+                ],
+                "retrieval_query": "sales obstacles business development strategy competitors"
+            }
+        ],
+        "docx_template": "report_templates/sales_report.docx",
+        "transformations": {
+            "make_executive": "Rewrite this sales summary for an executive audience, highlighting closing revenue.",
+            "clarify": "Improve clarity of deal status and sales bottlenecks.",
+            "shorten": "Condense sales progress findings."
         }
     }
 }
+
 
 
 class ReportAutomationEngine:
@@ -425,17 +534,70 @@ class ReportAutomationEngine:
         
         --- TASK ---
         Apply the requested action to the text while strictly adhering to Adept's professional tone. 
+
+        --- CRITICAL FORMATTING RULES ---
         1. Preserve all key data points.
-        2. Ensure sub-section numbering is maintained: {section_index}.1, {section_index}.2, etc.
-        3. NEVER use bullet points (*) for major sub-headings. ALWAYS use the {section_index}.X format.
-        4. Maintain double-newlines between topics for clarity.
-        5. If the original text contains placeholders like [mention features] and you still have no data, replace them with 'N/A'.
-        6. Do NOT include the main section title ({section_meta['title']}) in your response.
+        2. Maintain sub-section numbering in the format: {section_index}.1, {section_index}.2, etc. Do NOT use regular bullet points (*) for major sub-headings.
+        3. Maintain double-newlines between topics for clarity.
+        4. If the section contains list items or structured data (such as issues, QA metrics, SLA compliance, or key accomplishments), you MUST format it as a valid Markdown Table.
+        5. Every Markdown Table must be complete: it must have a header row, a separator row (e.g. `|---|---|`), and fully populated data rows. NEVER leave a table incomplete, truncated, or half-written.
+        6. If the original text contains placeholders like [mention features] and you still have no data, replace them with 'N/A'.
+        7. Do NOT include the main section title ({section_meta['title']}) in your response.
+        8. Return ONLY the refined text. Do not add markdown fences around the response unless it is part of the content itself.
         """
         
         from agent_manager import call_gemini_sync
         refined_text = call_gemini_sync(prompt)
         return self._sanitize_markdown(refined_text)
+
+    def apply_suggestion(self, report_type, section_id, suggestion, current_text, answers):
+        """
+        Integrates a Strategic Advisor suggestion into the section draft.
+        """
+        if report_type not in REPORT_TYPES:
+            raise ValueError(f"Unknown report type: {report_type}")
+
+        config = REPORT_TYPES[report_type]
+        section_meta = next((s for s in config["sections"] if s["id"] == section_id), None)
+        if not section_meta:
+            raise ValueError(f"Section {section_id} not found in report type {report_type}")
+
+        section_index = config['sections'].index(section_meta)
+
+        prompt = f"""
+        You are an expert McKinsey-style editor working on an Adept report.
+        Your task is to rewrite the draft for the section '{section_meta['title']}' to integrate a strategic suggestion from the AI advisor.
+
+        --- STRATEGIC SUGGESTION TO APPLY ---
+        {suggestion}
+
+        --- CURRENT SECTION DRAFT ---
+        {current_text}
+
+        --- ADDITIONAL FORM ANSWERS ---
+        {json.dumps(answers, indent=2)}
+
+        --- TASK ---
+        Rewrite the section draft to integrate the advisor's suggestion.
+
+        --- CRITICAL FORMATTING RULES ---
+        1. Use a McKinsey-style, consulting-grade, professional active voice.
+        2. Fully integrate the suggestion naturally and professionally. Ensure all relevant facts, figures, and data from the original draft and additional form answers are preserved.
+        3. Maintain sub-section numbering in the format: {section_index}.1, {section_index}.2, etc. Do NOT use regular bullet points (*) for major sub-headings.
+        4. If the section contains list items or structured data (such as issues, QA metrics, SLA compliance, or key accomplishments), you MUST format it as a valid Markdown Table.
+        5. Every Markdown Table must be complete: it must have a header row, a separator row (e.g. `|---|---|`), and fully populated data rows. NEVER leave a table incomplete, truncated, or half-written.
+        6. NO Markdown headers (#). Use the {section_index}.X numbering for headings (e.g., {section_index}.1, {section_index}.2).
+        7. Bolding is allowed for sub-headings.
+        8. Do NOT include the main section title ({section_meta['title']}) at the beginning of the text.
+        9. Output 'N/A' for missing data fields.
+        10. Use double newlines between sub-sections.
+        11. Return ONLY the updated section draft text. Do not add markdown fences around the response unless it is part of the content itself.
+        """
+
+        from agent_manager import call_gemini_sync
+        logger.info(f"Applying suggestion for {section_meta['title']}")
+        updated_text = call_gemini_sync(prompt)
+        return self._sanitize_markdown(updated_text)
 
     def analyze_report(self, report_type, sections):
         """

@@ -946,6 +946,29 @@ def refine_report_section():
         logger.error(f"Refinement failed: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/reports/apply-suggestion', methods=['POST'])
+@jwt_optional
+def apply_report_suggestion():
+    """
+    Integrates a Strategic Advisor suggestion into a section draft.
+    """
+    data = request.json
+    report_type = data.get("type")
+    section_id = data.get("section_id")
+    suggestion = data.get("suggestion")
+    current_text = data.get("current_text")
+    answers = data.get("answers", {})
+
+    if not all([report_type, section_id, suggestion]):
+        return jsonify({"error": "Missing required fields: type, section_id, suggestion"}), 400
+
+    try:
+        updated_text = engine.apply_suggestion(report_type, section_id, suggestion, current_text or '', answers)
+        return jsonify({"updated_text": updated_text, "success": True}), 200
+    except Exception as e:
+        logger.error(f"Applying suggestion failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/reports/analyze', methods=['POST'])
 @jwt_optional
 def analyze_report_consistency():
