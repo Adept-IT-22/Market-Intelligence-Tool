@@ -481,15 +481,15 @@
           <div class="col-scroll">
             <ul class="insight-list">
               <ng-container *ngFor="let item of s.analysis?.inconsistencies">
-                <li *ngIf="!isDismissed(item.text)" class="insight-item clickable" (click)="jumpToFix(item.target_id)">
+                <li *ngIf="!isDismissed(item.target_id, item.text)" class="insight-item clickable" (click)="jumpToFix(item.target_id)">
                   <mat-icon>error_outline</mat-icon>
                   <span class="insight-text">{{ item.text }}</span>
                   <div class="insight-actions">
-                    <button mat-icon-button class="btn-accept" [disabled]="activeAccepts()[item.text]" (click)="acceptSuggestion(item.target_id, item.text, $event)" matTooltip="Accept & Rewrite">
-                      <mat-icon *ngIf="!activeAccepts()[item.text]">check</mat-icon>
-                      <mat-spinner *ngIf="activeAccepts()[item.text]" diameter="16"></mat-spinner>
+                    <button mat-icon-button class="btn-accept" [disabled]="activeAccepts()[insightKey(item.target_id, item.text)]" (click)="acceptSuggestion(item.target_id, item.text, $event)" matTooltip="Accept & Rewrite">
+                      <mat-icon *ngIf="!activeAccepts()[insightKey(item.target_id, item.text)]">check</mat-icon>
+                      <mat-spinner *ngIf="activeAccepts()[insightKey(item.target_id, item.text)]" diameter="16"></mat-spinner>
                     </button>
-                    <button mat-icon-button class="btn-dismiss" (click)="dismissInsight(item.text, $event)" matTooltip="Dismiss">
+                    <button mat-icon-button class="btn-dismiss" (click)="dismissInsight(item.target_id, item.text, $event)" matTooltip="Dismiss">
                       <mat-icon>close</mat-icon>
                     </button>
                   </div>
@@ -503,15 +503,15 @@
           <div class="col-scroll">
             <ul class="insight-list">
               <ng-container *ngFor="let item of s.analysis?.risks">
-                <li *ngIf="!isDismissed(item.text)" class="insight-item clickable" (click)="jumpToFix(item.target_id)">
+                <li *ngIf="!isDismissed(item.target_id, item.text)" class="insight-item clickable" (click)="jumpToFix(item.target_id)">
                   <mat-icon>warning_amber</mat-icon>
                   <span class="insight-text">{{ item.text }}</span>
                   <div class="insight-actions">
-                    <button mat-icon-button class="btn-accept" [disabled]="activeAccepts()[item.text]" (click)="acceptSuggestion(item.target_id, item.text, $event)" matTooltip="Accept & Rewrite">
-                      <mat-icon *ngIf="!activeAccepts()[item.text]">check</mat-icon>
-                      <mat-spinner *ngIf="activeAccepts()[item.text]" diameter="16"></mat-spinner>
+                    <button mat-icon-button class="btn-accept" [disabled]="activeAccepts()[insightKey(item.target_id, item.text)]" (click)="acceptSuggestion(item.target_id, item.text, $event)" matTooltip="Accept & Rewrite">
+                      <mat-icon *ngIf="!activeAccepts()[insightKey(item.target_id, item.text)]">check</mat-icon>
+                      <mat-spinner *ngIf="activeAccepts()[insightKey(item.target_id, item.text)]" diameter="16"></mat-spinner>
                     </button>
-                    <button mat-icon-button class="btn-dismiss" (click)="dismissInsight(item.text, $event)" matTooltip="Dismiss">
+                    <button mat-icon-button class="btn-dismiss" (click)="dismissInsight(item.target_id, item.text, $event)" matTooltip="Dismiss">
                       <mat-icon>close</mat-icon>
                     </button>
                   </div>
@@ -525,15 +525,15 @@
           <div class="col-scroll">
             <ul class="insight-list">
               <ng-container *ngFor="let item of s.analysis?.suggestions">
-                <li *ngIf="!isDismissed(item.text)" class="insight-item clickable" (click)="jumpToFix(item.target_id)">
+                <li *ngIf="!isDismissed(item.target_id, item.text)" class="insight-item clickable" (click)="jumpToFix(item.target_id)">
                   <mat-icon>lightbulb_outline</mat-icon>
                   <span class="insight-text">{{ item.text }}</span>
                   <div class="insight-actions">
-                    <button mat-icon-button class="btn-accept" [disabled]="activeAccepts()[item.text]" (click)="acceptSuggestion(item.target_id, item.text, $event)" matTooltip="Accept & Rewrite">
-                      <mat-icon *ngIf="!activeAccepts()[item.text]">check</mat-icon>
-                      <mat-spinner *ngIf="activeAccepts()[item.text]" diameter="16"></mat-spinner>
+                    <button mat-icon-button class="btn-accept" [disabled]="activeAccepts()[insightKey(item.target_id, item.text)]" (click)="acceptSuggestion(item.target_id, item.text, $event)" matTooltip="Accept & Rewrite">
+                      <mat-icon *ngIf="!activeAccepts()[insightKey(item.target_id, item.text)]">check</mat-icon>
+                      <mat-spinner *ngIf="activeAccepts()[insightKey(item.target_id, item.text)]" diameter="16"></mat-spinner>
                     </button>
-                    <button mat-icon-button class="btn-dismiss" (click)="dismissInsight(item.text, $event)" matTooltip="Dismiss">
+                    <button mat-icon-button class="btn-dismiss" (click)="dismissInsight(item.target_id, item.text, $event)" matTooltip="Dismiss">
                       <mat-icon>close</mat-icon>
                     </button>
                   </div>

@@ -102,15 +102,21 @@ export class ReportStudioComponent implements OnInit {
   public dismissedInsights = signal<string[]>([]);
   public activeAccepts = signal<Record<string, boolean>>({});
 
-  dismissInsight(text: string, event?: Event) {
+  insightKey(targetId: string, text: string): string {
+    return `${targetId}:${text}`;
+  }
+
+  dismissInsight(targetId: string, text: string, event?: Event) {
     if (event) {
       event.stopPropagation();
     }
-    this.dismissedInsights.update(curr => [...curr, text]);
+    const key = this.insightKey(targetId, text);
+    this.dismissedInsights.update(curr => [...curr, key]);
   }
 
-  isDismissed(text: string): boolean {
-    return this.dismissedInsights().includes(text);
+  isDismissed(targetId: string, text: string): boolean {
+    const key = this.insightKey(targetId, text);
+    return this.dismissedInsights().includes(key);
   }
 
   acceptSuggestion(targetId: string, text: string, event?: Event) {
@@ -123,15 +129,16 @@ export class ReportStudioComponent implements OnInit {
       const currentText = section.userOverride ?? section.aiDraft ?? '';
       this.saveHistory(targetId, currentText);
     }
-    this.activeAccepts.update(curr => ({ ...curr, [text]: true }));
+    const key = this.insightKey(targetId, text);
+    this.activeAccepts.update(curr => ({ ...curr, [key]: true }));
     this.reportService.applyAdvisorSuggestion(targetId, text)?.subscribe({
       next: () => {
-        this.dismissInsight(text);
-        this.activeAccepts.update(curr => ({ ...curr, [text]: false }));
+        this.dismissInsight(targetId, text);
+        this.activeAccepts.update(curr => ({ ...curr, [key]: false }));
       },
       error: (err) => {
         console.error('Failed to apply suggestion', err);
-        this.activeAccepts.update(curr => ({ ...curr, [text]: false }));
+        this.activeAccepts.update(curr => ({ ...curr, [key]: false }));
       }
     });
   }
@@ -695,8 +702,8 @@ export class ReportStudioComponent implements OnInit {
     const formData = metadata.formData || {};
     return {
       project: formData['project_name'] || 'Market Intelligence',
-      preparedBy: formData['prepared_by'] || 'Adept Studio',
-      date: formData['reporting_date'] || this.currentMonthYear,
+      preparedBy: formData['report_by'] || formData['prepared_by'] || 'Adept Studio',
+      date: formData['period'] || formData['reporting_date'] || this.currentMonthYear,
       type: this.reportTypes.find(t => t.id === s?.type)?.name || 'Strategic Report'
     };
   }
