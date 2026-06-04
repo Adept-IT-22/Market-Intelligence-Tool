@@ -19,6 +19,9 @@
         <button mat-button class="btn-secondary" (click)="loadDemoData()">
           <mat-icon>auto_fix_high</mat-icon> Load Demo
         </button>
+        <button mat-icon-button (click)="clearDemoData()" matTooltip="Clear all data" style="vertical-align: middle; margin-left: 4px; margin-right: 8px; color: rgba(255, 255, 255, 0.7);">
+          <mat-icon>close</mat-icon>
+        </button>
         <button mat-button class="btn-secondary" (click)="generateReport()" [disabled]="s.isGenerating">
           <mat-icon *ngIf="!s.isGenerating">bolt</mat-icon>
           <mat-spinner *ngIf="s.isGenerating" diameter="18" style="display:inline-block; margin-right: 8px;"></mat-spinner>
@@ -40,13 +43,29 @@
           <div *ngIf="s.sections[0] as meta" class="step setup-step" [class.active]="activeSectionIndex() === 0"
             (click)="scrollToSection(0)">
             <div class="step-num"><mat-icon>settings</mat-icon></div>
-            <span class="step-title">{{ meta.title }}</span>
+            <span class="step-title" *ngIf="editingSectionId() !== meta.id" (dblclick)="startEditingTitle(meta.id)">{{ meta.title }}</span>
+            <input *ngIf="editingSectionId() === meta.id"
+              [value]="meta.title"
+              (blur)="saveTitle(meta.id, $event)"
+              (keyup.enter)="saveTitle(meta.id, $event)"
+              (keyup.escape)="cancelEditingTitle()"
+              class="step-title-input"
+              (click)="$event.stopPropagation()"
+              #stepTitleInput>
           </div>
 
           <div *ngFor="let section of s.sections.slice(1); let i = index" class="step"
             [class.active]="activeSectionIndex() === (i + 1)" (click)="scrollToSection(i + 1)">
             <div class="step-num">{{ getTOCIndex(s.sections, i + 1) }}</div>
-            <span class="step-title">{{ section.title }}</span>
+            <span class="step-title" *ngIf="editingSectionId() !== section.id" (dblclick)="startEditingTitle(section.id)">{{ section.title }}</span>
+            <input *ngIf="editingSectionId() === section.id"
+              [value]="section.title"
+              (blur)="saveTitle(section.id, $event)"
+              (keyup.enter)="saveTitle(section.id, $event)"
+              (keyup.escape)="cancelEditingTitle()"
+              class="step-title-input"
+              (click)="$event.stopPropagation()"
+              #stepTitleInput>
             <mat-icon *ngIf="section.isEdited" class="edited-tag">edit_note</mat-icon>
           </div>
         </div>
@@ -76,7 +95,17 @@
 
         <div class="form-content">
           <div class="section-card" *ngIf="s.sections[activeSectionIndex()] as section" [id]="'field-' + section.id">
-            <h3>{{ section.title }}</h3>
+            <h3 *ngIf="editingSectionId() !== section.id" (dblclick)="startEditingTitle(section.id)" class="editable-title" matTooltip="Double-click to rename section">
+              {{ section.title }}
+              <mat-icon class="title-edit-icon">edit</mat-icon>
+            </h3>
+            <input *ngIf="editingSectionId() === section.id"
+              [value]="section.title"
+              (blur)="saveTitle(section.id, $event)"
+              (keyup.enter)="saveTitle(section.id, $event)"
+              (keyup.escape)="cancelEditingTitle()"
+              class="title-edit-input"
+              #titleInput>
             <p class="subtitle">Complete the fields below to synthesize this section.</p>
 
             <div class="questions">
@@ -220,8 +249,16 @@
                     <h4>{{ getTOCIndex(s.sections, i) }}. {{ section.title }}</h4>
                     <!-- Section AI Controls -->
                     <div class="ai-controls" *ngIf="section.aiDraft || section.userOverride">
+                      <!-- Undo / Redo Buttons -->
+                      <button mat-icon-button [disabled]="!canUndo(section.id)" (click)="undo(section.id)" matTooltip="Undo last change" style="margin-right: 2px;">
+                        <mat-icon style="font-size: 20px; width: 20px; height: 20px; line-height: 20px;">undo</mat-icon>
+                      </button>
+                      <button mat-icon-button [disabled]="!canRedo(section.id)" (click)="redo(section.id)" matTooltip="Redo change" style="margin-right: 6px;">
+                        <mat-icon style="font-size: 20px; width: 20px; height: 20px; line-height: 20px;">redo</mat-icon>
+                      </button>
+
                       <button mat-icon-button [matMenuTriggerFor]="refineMenu" matTooltip="Refine with AI">
-                        <mat-icon>magic_button</mat-icon>
+                        <mat-icon>auto_awesome</mat-icon>
                       </button>
                       <mat-menu #refineMenu="matMenu">
                         <button mat-menu-item (click)="refine(section.id, 'make_executive')">
@@ -238,12 +275,7 @@
                         </button>
                       </mat-menu>
 
-                      <!-- Confidence & Source Anchors -->
-                      <div class="confidence-tag" [ngClass]="section.confidence.level.toLowerCase() || 'low'"
-                        [matTooltip]="section.confidence.reason || ''" (click)="setActiveSection(i)">
-                        <mat-icon>verified</mat-icon>
-                        {{ section.confidence.level }}
-                      </div>
+
                     </div>
                   </div>
 
@@ -252,18 +284,18 @@
                     <div class="section-header">
                       <h4>{{ getTOCIndex(s.sections, i) }}. {{ section.title }}</h4>
                     </div>
-                    <div class="project-phase" *ngIf="s.sections[0].formData['sprint_no']">
-                      <strong>Sprint Goal:</strong> Sprint {{ s.sections[0].formData['sprint_no'] }} – {{
-                      s.sections[0].formData['sprint_goal'] || 'Strategic Growth' }}
+                    <div class="project-phase" *ngIf="s.sections[0]?.formData?.['sprint_no']">
+                      <strong>Sprint Goal:</strong> Sprint {{ s.sections[0]?.formData?.['sprint_no'] }} – {{
+                      s.sections[0]?.formData?.['sprint_goal'] || 'Strategic Growth' }}
                     </div>
 
                     <div class="bento-grid">
                       <!-- Status Card -->
                       <div class="bento-card card-status">
                         <h4>Status</h4>
-                        <div class="status-val">{{ s.sections[2].formData['status_rating'] || '---' }}</div>
+                        <div class="status-val">{{ getSectionById(s, 'status')?.formData?.['status_rating'] || '---' }}</div>
                         <div class="card-content" style="margin-top: 8px; font-size: 0.8rem; opacity: 0.9;">
-                          {{ s.sections[2].formData['timeline'] || 'No timeline set' }}
+                          {{ getSectionById(s, 'status')?.formData?.['timeline'] || 'No timeline set' }}
                         </div>
                       </div>
 
@@ -271,7 +303,7 @@
                       <div class="bento-card card-summary">
                         <h4>Executive Summary</h4>
                         <div class="card-content">
-                          <p>{{ s.sections[2].formData['summary_text'] || 'Strategic synthesis pending...' }}</p>
+                          <p>{{ getSectionById(s, 'intro')?.formData?.['executive_summary'] || 'Strategic synthesis pending...' }}</p>
                         </div>
                       </div>
 
@@ -304,8 +336,8 @@
                       <div class="bento-card card-meta">
                         <h4>Project Info</h4>
                         <div class="card-content">
-                          <div class="meta-line"><strong>Project:</strong> {{ s.sections[0].formData['project_name'] || '---' }}</div>
-                          <div class="meta-line"><strong>Prepared By:</strong> {{ s.sections[0].formData['report_by'] || '---' }}</div>
+                          <div class="meta-line"><strong>Project:</strong> {{ getSectionById(s, 'metadata')?.formData?.['project_name'] || '---' }}</div>
+                          <div class="meta-line"><strong>Prepared By:</strong> {{ getSectionById(s, 'metadata')?.formData?.['report_by'] || '---' }}</div>
                         </div>
                       </div>
                     </div>
@@ -444,39 +476,69 @@
       </div>
 
       <div class="insight-grid" *ngIf="hasAnalysis(s); else waitingState">
-        <div class="insight-col" *ngIf="s.analysis?.inconsistencies?.length">
+        <div class="insight-col" *ngIf="hasVisibleInsights(s.analysis?.inconsistencies)">
           <span class="label error">Inconsistencies</span>
           <div class="col-scroll">
             <ul class="insight-list">
-              <li *ngFor="let item of s.analysis?.inconsistencies" class="insight-item clickable"
-                (click)="jumpToFix(item.target_id)">
-                <mat-icon>error_outline</mat-icon>
-                <span>{{ item.text }}</span>
-              </li>
+              <ng-container *ngFor="let item of s.analysis?.inconsistencies">
+                <li *ngIf="!isDismissed(item.target_id, item.text)" class="insight-item clickable" (click)="jumpToFix(item.target_id)">
+                  <mat-icon>error_outline</mat-icon>
+                  <span class="insight-text">{{ item.text }}</span>
+                  <div class="insight-actions">
+                    <button mat-icon-button class="btn-accept" [disabled]="activeAccepts()[insightKey(item.target_id, item.text)]" (click)="acceptSuggestion(item.target_id, item.text, $event)" matTooltip="Accept & Rewrite">
+                      <mat-icon *ngIf="!activeAccepts()[insightKey(item.target_id, item.text)]">check</mat-icon>
+                      <mat-spinner *ngIf="activeAccepts()[insightKey(item.target_id, item.text)]" diameter="16"></mat-spinner>
+                    </button>
+                    <button mat-icon-button class="btn-dismiss" (click)="dismissInsight(item.target_id, item.text, $event)" matTooltip="Dismiss">
+                      <mat-icon>close</mat-icon>
+                    </button>
+                  </div>
+                </li>
+              </ng-container>
             </ul>
           </div>
         </div>
-        <div class="insight-col" *ngIf="s.analysis?.risks?.length">
+        <div class="insight-col" *ngIf="hasVisibleInsights(s.analysis?.risks)">
           <span class="label warning">Risks Detected</span>
           <div class="col-scroll">
             <ul class="insight-list">
-              <li *ngFor="let item of s.analysis?.risks" class="insight-item clickable"
-                (click)="jumpToFix(item.target_id)">
-                <mat-icon>warning_amber</mat-icon>
-                <span>{{ item.text }}</span>
-              </li>
+              <ng-container *ngFor="let item of s.analysis?.risks">
+                <li *ngIf="!isDismissed(item.target_id, item.text)" class="insight-item clickable" (click)="jumpToFix(item.target_id)">
+                  <mat-icon>warning_amber</mat-icon>
+                  <span class="insight-text">{{ item.text }}</span>
+                  <div class="insight-actions">
+                    <button mat-icon-button class="btn-accept" [disabled]="activeAccepts()[insightKey(item.target_id, item.text)]" (click)="acceptSuggestion(item.target_id, item.text, $event)" matTooltip="Accept & Rewrite">
+                      <mat-icon *ngIf="!activeAccepts()[insightKey(item.target_id, item.text)]">check</mat-icon>
+                      <mat-spinner *ngIf="activeAccepts()[insightKey(item.target_id, item.text)]" diameter="16"></mat-spinner>
+                    </button>
+                    <button mat-icon-button class="btn-dismiss" (click)="dismissInsight(item.target_id, item.text, $event)" matTooltip="Dismiss">
+                      <mat-icon>close</mat-icon>
+                    </button>
+                  </div>
+                </li>
+              </ng-container>
             </ul>
           </div>
         </div>
-        <div class="insight-col" *ngIf="s.analysis?.suggestions?.length">
+        <div class="insight-col" *ngIf="hasVisibleInsights(s.analysis?.suggestions)">
           <span class="label info">Strategic Suggestions</span>
           <div class="col-scroll">
             <ul class="insight-list">
-              <li *ngFor="let item of s.analysis?.suggestions" class="insight-item clickable"
-                (click)="jumpToFix(item.target_id)">
-                <mat-icon>lightbulb_outline</mat-icon>
-                <span>{{ item.text }}</span>
-              </li>
+              <ng-container *ngFor="let item of s.analysis?.suggestions">
+                <li *ngIf="!isDismissed(item.target_id, item.text)" class="insight-item clickable" (click)="jumpToFix(item.target_id)">
+                  <mat-icon>lightbulb_outline</mat-icon>
+                  <span class="insight-text">{{ item.text }}</span>
+                  <div class="insight-actions">
+                    <button mat-icon-button class="btn-accept" [disabled]="activeAccepts()[insightKey(item.target_id, item.text)]" (click)="acceptSuggestion(item.target_id, item.text, $event)" matTooltip="Accept & Rewrite">
+                      <mat-icon *ngIf="!activeAccepts()[insightKey(item.target_id, item.text)]">check</mat-icon>
+                      <mat-spinner *ngIf="activeAccepts()[insightKey(item.target_id, item.text)]" diameter="16"></mat-spinner>
+                    </button>
+                    <button mat-icon-button class="btn-dismiss" (click)="dismissInsight(item.target_id, item.text, $event)" matTooltip="Dismiss">
+                      <mat-icon>close</mat-icon>
+                    </button>
+                  </div>
+                </li>
+              </ng-container>
             </ul>
           </div>
         </div>
@@ -594,18 +656,18 @@
               <div class="section-header">
                 <h4>{{ getTOCIndex(s.sections, i) }}. {{ section.title }}</h4>
               </div>
-              <div class="project-phase" *ngIf="s.sections[0].formData['sprint_no']">
-                <strong>Sprint Goal:</strong> Sprint {{ s.sections[0].formData['sprint_no'] }} – {{
-                s.sections[0].formData['sprint_goal'] || 'Strategic Growth' }}
+              <div class="project-phase" *ngIf="getSectionById(s, 'metadata')?.formData?.['sprint_no']">
+                <strong>Sprint Goal:</strong> Sprint {{ getSectionById(s, 'metadata')?.formData?.['sprint_no'] }} – {{
+                getSectionById(s, 'metadata')?.formData?.['sprint_goal'] || 'Strategic Growth' }}
               </div>
 
               <div class="bento-grid">
                 <!-- Status Card -->
                 <div class="bento-card card-status">
                   <h4>Status</h4>
-                  <div class="status-val">{{ s.sections[2].formData['status_rating'] || '---' }}</div>
+                  <div class="status-val">{{ getSectionById(s, 'status')?.formData?.['status_rating'] || '---' }}</div>
                   <div class="card-content" style="margin-top: 8px; font-size: 0.8rem; opacity: 0.9;">
-                    {{ s.sections[2].formData['timeline'] || 'No timeline set' }}
+                    {{ getSectionById(s, 'status')?.formData?.['timeline'] || 'No timeline set' }}
                   </div>
                 </div>
 
@@ -613,7 +675,7 @@
                 <div class="bento-card card-summary">
                   <h4>Executive Summary</h4>
                   <div class="card-content">
-                    <p>{{ s.sections[2].formData['summary_text'] || 'Strategic synthesis pending...' }}</p>
+                    <p>{{ getSectionById(s, 'intro')?.formData?.['executive_summary'] || 'Strategic synthesis pending...' }}</p>
                   </div>
                 </div>
 
@@ -643,8 +705,8 @@
                 <div class="bento-card card-meta">
                   <h4>Project Info</h4>
                   <div class="card-content">
-                    <div class="meta-line"><strong>Project:</strong> {{ s.sections[0].formData['project_name'] || '---' }}</div>
-                    <div class="meta-line"><strong>Prepared By:</strong> {{ s.sections[0].formData['report_by'] || '---' }}</div>
+                    <div class="meta-line"><strong>Project:</strong> {{ getSectionById(s, 'metadata')?.formData?.['project_name'] || '---' }}</div>
+                    <div class="meta-line"><strong>Prepared By:</strong> {{ getSectionById(s, 'metadata')?.formData?.['report_by'] || '---' }}</div>
                   </div>
                 </div>
               </div>

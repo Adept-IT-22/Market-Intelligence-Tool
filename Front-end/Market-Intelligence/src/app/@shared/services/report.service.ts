@@ -199,6 +199,50 @@ export class ReportService {
     );
   }
 
+  applyAdvisorSuggestion(sectionId: string, suggestion: string) {
+    const state = this.stateSubject.value;
+    if (!state) return null;
+
+    const section = state.sections.find(s => s.id === sectionId);
+    if (!section) return null;
+
+    // Set thinking/loading state on the target section
+    const thinkingSections = state.sections.map(s => s.id === sectionId ? { ...s, isThinking: true } : s);
+    this.stateSubject.next({ ...state, sections: thinkingSections });
+
+    const payload = {
+      type: state.type,
+      section_id: sectionId,
+      suggestion: suggestion,
+      current_text: section.userOverride ?? section.aiDraft ?? '',
+      answers: section.formData
+    };
+
+    return this.http.post(`${this.apiUrl}/apply-suggestion`, payload).pipe(
+      tap((res: any) => {
+        const latestState = this.stateSubject.value;
+        if (res.success && latestState) {
+          const finalSections = latestState.sections.map(s => {
+            if (s.id === sectionId) {
+              return { ...s, aiDraft: res.updated_text, userOverride: null, isEdited: false, isThinking: false };
+            }
+            return s;
+          });
+          this.stateSubject.next({ ...latestState, sections: finalSections });
+          this.analyzeReport();  // Re-trigger analysis after updating text
+        }
+      }),
+      finalize(() => {
+        const latestState = this.stateSubject.value;
+        if (!latestState) return;
+        const resetSections = latestState.sections.map(s =>
+          s.id === sectionId ? { ...s, isThinking: false } : s
+        );
+        this.stateSubject.next({ ...latestState, sections: resetSections });
+      })
+    );
+  }
+
   /**
    * The 'Advisor' Layer.
    */
@@ -242,6 +286,19 @@ export class ReportService {
       const updatedSections = state.sections.map(s => {
         if (s.id === sectionId) {
           return { ...s, userOverride: text, isEdited: true };
+        }
+        return s;
+      });
+      this.stateSubject.next({ ...state, sections: updatedSections });
+    }
+  }
+
+  updateSectionTitle(sectionId: string, title: string) {
+    const state = this.stateSubject.value;
+    if (state) {
+      const updatedSections = state.sections.map(s => {
+        if (s.id === sectionId) {
+          return { ...s, title };
         }
         return s;
       });
